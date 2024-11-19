@@ -1,6 +1,5 @@
 import datetime as dt
 
-import dash_bootstrap_components as dbc
 from dash import html
 
 footer_layout = html.Footer(
