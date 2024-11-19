@@ -1,7 +1,8 @@
 dash
-dash_iconify
+dash_bootstrap_components
 dash-core-components
 dash-html-components
-dash_mantine_components
+dash_iconify
 dash-leaflet
-uvicorn[standard]
+dash_mantine_components
+gunicorn
