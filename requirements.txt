@@ -1,0 +1,7 @@
+dash
+dash_iconify
+dash-core-components
+dash-html-components
+dash_mantine_components
+dash-leaflet
+uvicorn[standard]
