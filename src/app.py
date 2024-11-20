@@ -7,12 +7,7 @@ from callbacks import map_callbacks
 stylesheets = [
     "https://cdn.web.bas.ac.uk/bas-style-kit/0.7.3/css/bas-style-kit.min.css",
     dbc.themes.BOOTSTRAP,
-    dmc.styles.DATES,
-    dmc.styles.CODE_HIGHLIGHT,
-    dmc.styles.CHARTS,
-    dmc.styles.CAROUSEL,
-    dmc.styles.NOTIFICATIONS,
-    dmc.styles.NPROGRESS,
+    dmc.styles.ALL,
 ]
 
 app = dash.Dash(__name__, external_stylesheets=[*stylesheets])
