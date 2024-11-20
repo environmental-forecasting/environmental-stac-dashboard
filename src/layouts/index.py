@@ -1,10 +1,38 @@
-from components import footer, header, sidebar
+from components import footer, header, sidebar, map
 from dash import html
+import dash_bootstrap_components as dbc
 
-layout = html.Div(
-    [
-        header.header_layout,
-        sidebar.sidebar_layout,
-        footer.footer_layout,
-    ]
+layout = dbc.Container(
+    className="g-0",
+    fluid=True,
+    style={
+        "height": "100vh",  # Ensure the row takes up full viewport height
+        "display": "flex",  # Use flexbox for the row layout
+        "flexDirection": "column",  # Stack children vertically
+    },
+    children=[
+        dbc.Row(dbc.Col(header.header_layout, width=12)),
+        dbc.Row(
+            [
+                dbc.Col(sidebar.sidebar_layout, width=2),
+                dbc.Col(
+                    html.Div(
+                        map.leaflet_map,
+                        style={
+                            "height": "100%",  # Let the map fill the parent container
+                            "flex": "1",  # Make sure the map takes available space in the column
+                        },
+                    ),
+                    width=10,
+                ),
+            ],
+            className="g-0",
+            style={
+                "height": "100vh",  # Ensure the row takes up full viewport height
+                "display": "flex",  # Use flexbox for the row layout
+                "flexDirection": "row",  # Stack children horizontally
+            },
+        ),
+        dbc.Row(dbc.Col(footer.footer_layout, width=12)),
+    ],
 )

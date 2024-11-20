@@ -3,7 +3,7 @@ from dash import html
 
 sidebar_layout = html.Div(
     [
-        html.H2("", className="display-4"),
+        html.H2("CRS", className="display-4"),
         html.Hr(),
         html.P("Options", className="lead"),
         dbc.Nav(
@@ -16,5 +16,5 @@ sidebar_layout = html.Div(
             pills=True,
         ),
     ],
-    className="sidebar",
+    className="sidebar p-3",
 )

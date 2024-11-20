@@ -4,7 +4,6 @@ from dash import html
 
 footer_layout = html.Footer(
     className="site-footer",
-    style={"position": "fixed", "bottom": 0, "left": 0, "width": "100%"},
     children=[
         html.Div(
             className="bsk-footer bsk-footer-default m-0 pb-3",
