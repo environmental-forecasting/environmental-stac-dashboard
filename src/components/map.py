@@ -1,6 +1,8 @@
+import datetime as dt
 import dash_leaflet as dl
 import requests
 from dash import dcc, html
+import dash_mantine_components as dmc
 
 # Default settings
 DEFAULT_CENTER = [0, 0]
@@ -88,6 +90,16 @@ leaflet_map = html.Div(
         # Controls for map manipulation
         html.Div(
             [
+                html.Label("Select Date:"),
+                # dmc.DatePickerInput(w=200, numberOfColumns=1),
+                dcc.DatePickerSingle(
+                    id="forecast-init-date-picker",
+                    min_date_allowed=dt.date(2020, 1, 1),
+                    max_date_allowed=dt.datetime.today().date() - dt.timedelta(days=6),
+                    initial_visible_month=dt.datetime.today().date(),
+                    display_format='YYYY-MM-DD',
+                    # start_date_placeholder_text='MMM Do, YY'
+                ),
                 html.Label("Select Variable:"),
                 dcc.Dropdown(
                     id="variable-dropdown",
@@ -100,7 +112,7 @@ leaflet_map = html.Div(
                     id="colormap-dropdown",
                     options=[{"label": col, "value": col} for col in colormap_options],
                     value="blues_r",
-                    clearable=True,
+                    clearable=False,
                 ),
                 html.Label("Opacity Control:"),
                 dcc.Slider(
@@ -119,10 +131,10 @@ leaflet_map = html.Div(
                 "position": "absolute",
                 "top": "20%",
                 "right": "20px",
-                "background": "rgba(255, 255, 255, 0.75)",
+                "background": "rgba(255, 255, 255, 0.8)",
                 "padding": "10px",
                 "borderRadius": "10px",
-                "boxShadow": "0 4px 6px rgba(0, 0, 0, 0.1)",
+                "boxShadow": "0 6px 8px rgba(0, 0, 0, 0.1)",
                 "width": "250px",
                 "zIndex": 1000,  # Ensure controls are on top of the map
             },
