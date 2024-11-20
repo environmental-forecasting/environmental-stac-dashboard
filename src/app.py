@@ -1,8 +1,8 @@
 import dash
 import dash_bootstrap_components as dbc
 import dash_mantine_components as dmc
-from dash import _dash_renderer
 from layouts import index
+from callbacks import map_callbacks
 
 stylesheets = [
     "https://cdn.web.bas.ac.uk/bas-style-kit/0.7.3/css/bas-style-kit.min.css",
@@ -17,6 +17,9 @@ stylesheets = [
 
 app = dash.Dash(__name__, external_stylesheets=[*stylesheets])
 app.title = "IceNet Visualiser"
+
+# Register the callbacks
+map_callbacks.register_callbacks(app)
 
 app.layout = index.layout
 server = app.server

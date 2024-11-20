@@ -1,0 +1,131 @@
+import dash_leaflet as dl
+import requests
+from dash import dcc, html
+
+# Default settings
+DEFAULT_CENTER = [0, 0]
+DEFAULT_ZOOM = 2
+TITILER_URL = "http://localhost:8000"
+
+
+def get_colormaps():
+    try:
+        url = f"{TITILER_URL}/utils/colormaps"
+        response = requests.get(url)
+        AVAILABLE_COLORMAPS = sorted(response.json())
+    except requests.exceptions.RequestException:
+        print("No response...")
+        AVAILABLE_COLORMAPS = ["plasma", "cividis", "inferno", "magma", "viridis"]
+    return AVAILABLE_COLORMAPS
+
+
+variables = ["SIC Mean", "SIC Std Dev"]
+colormap_options = get_colormaps()
+
+leaflet_map = html.Div(
+    # style={'width': 'inherit', 'height': 'inherit'},
+    style={"width": "inherit", "height": "inherit", "position": "relative"},
+    children=[
+        dl.Map(
+            [
+                dl.LayersControl(
+                    [
+                        dl.BaseLayer(
+                            dl.TileLayer(zIndex=0),
+                            name="OpenStreetMap",
+                            checked=True,
+                        ),
+                        dl.BaseLayer(
+                            dl.TileLayer(
+                                url="https://watercolormaps.collection.cooperhewitt.org/tile/watercolor/{z}/{x}/{y}.jpg",
+                                minZoom=0,
+                                maxZoom=20,
+                                attribution=(
+                                    "Map tiles by Stamen Design, under CC BY 3.0. Data by OpenStreetMap, under CC BY SA."
+                                ),
+                                zIndex=0,
+                            ),
+                            name="Stamen Watercolour",
+                            checked=False,
+                        ),
+                        dl.BaseLayer(
+                            dl.TileLayer(
+                                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                                minZoom=0,
+                                maxZoom=20,
+                                attribution=(
+                                    r"Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"
+                                ),
+                                zIndex=0,
+                            ),
+                            name="ESRI: World Imagery",
+                            checked=False,
+                        ),
+                        dl.Overlay(
+                            dl.TileLayer(id="cog-map-layer", zIndex=1, opacity=1.0,),
+                            name="Results Layer",
+                            checked=True,
+                        ),
+                    ]
+                ),
+                dl.Colorbar(
+                    id="cbar",
+                    width=150,
+                    height=20,
+                    style={"margin-left": "40px"},
+                    position="bottomleft",
+                ),
+                dl.ScaleControl(position="bottomright"),
+                dl.FullScreenControl(),
+            ],
+            crs="EPSG3857",
+            attributionControl=True,
+            style={"width": "100%", "height": "80vh"},
+            center=DEFAULT_CENTER,
+            zoom=DEFAULT_ZOOM,
+            id="map",
+        ),
+        # Controls for map manipulation
+        html.Div(
+            [
+                html.Label("Select Variable:"),
+                dcc.Dropdown(
+                    id="variable-dropdown",
+                    options=[{"label": var, "value": var} for var in variables],
+                    value=variables[0],
+                    clearable=False,
+                ),
+                html.Label("Select Colormap:"),
+                dcc.Dropdown(
+                    id="colormap-dropdown",
+                    options=[{"label": col, "value": col} for col in colormap_options],
+                    value="blues_r",
+                    clearable=True,
+                ),
+                html.Label("Opacity Control:"),
+                dcc.Slider(
+                    id="opacity-slider",
+                    min=0.0,
+                    max=1.0,
+                    # step=0.1,
+                    value=1.0,
+                    updatemode="drag",
+                    persistence="True",
+                    persistence_type="memory",
+                    # marks={0: '0', 0.2: '0.2', 0.4: '0.4', 0.6: '0.6', 0.8: '0.8', 1: '1'},
+                ),
+            ],
+            style={
+                "position": "absolute",
+                "top": "20%",
+                "right": "20px",
+                "background": "rgba(255, 255, 255, 0.75)",
+                "padding": "10px",
+                "borderRadius": "10px",
+                "boxShadow": "0 4px 6px rgba(0, 0, 0, 0.1)",
+                "width": "250px",
+                "zIndex": 1000,  # Ensure controls are on top of the map
+            },
+        ),
+    ],
+)
