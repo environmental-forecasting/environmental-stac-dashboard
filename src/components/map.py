@@ -80,7 +80,7 @@ leaflet_map = html.Div(
             ],
             crs="EPSG3857",
             attributionControl=True,
-            style={"width": "100%", "height": "80vh"},
+            style={"width": "inherit", "height": "inherit"},
             center=DEFAULT_CENTER,
             zoom=DEFAULT_ZOOM,
             id="map",
