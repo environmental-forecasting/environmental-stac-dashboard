@@ -20,9 +20,19 @@ def get_colormaps():
         AVAILABLE_COLORMAPS = ["plasma", "cividis", "inferno", "magma", "viridis"]
     return AVAILABLE_COLORMAPS
 
+def get_forecast_start_dates():
+    try:
+        url = f"{TITILER_URL}/manifest/forecast_start_dates"
+        response  = requests.get(url)
+        AVAILABLE_START_DATES  = sorted(response.json())
+    except requests.exceptions.RequestException:
+        print("No response...")
+        AVAILABLE_START_DATES   = ["2024-11-12"]
+    return AVAILABLE_START_DATES
 
 variables = ["SIC Mean", "SIC Std Dev"]
-colormap_options = get_colormaps()
+AVAILABLE_COLORMAPS = get_colormaps()
+AVAILABLE_START_DATES = get_forecast_start_dates()
 
 leaflet_map = html.Div(
     # style={'width': 'inherit', 'height': 'inherit'},
@@ -110,7 +120,7 @@ leaflet_map = html.Div(
                 html.Label("Select Colormap:"),
                 dcc.Dropdown(
                     id="colormap-dropdown",
-                    options=[{"label": col, "value": col} for col in colormap_options],
+                    options=[{"label": col, "value": col} for col in AVAILABLE_COLORMAPS],
                     value="blues_r",
                     clearable=False,
                 ),
