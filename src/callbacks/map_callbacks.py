@@ -1,29 +1,69 @@
 import logging
 import requests
 
-from dash import Input, Output
+from dash import Input, Output, no_update
 
 TITILER_URL = "http://localhost:8000"
 COG_FILENAME = "sample.tif"
 
 
+# Function to generate tile URL for a STAC Item
+def get_tile_url(stac_item):
+    print(stac_item)
+    stac_item_url = stac_item.get_self_href()
+    print(stac_item_url)
+    return f"{TITILER_URL}/stac/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={stac_item_url}&assets=cog"
+
+# Load the STAC catalog
+import pystac
+catalog = pystac.Catalog.from_file("http://localhost:8002/data/stac/catalog.json")
+items = list(catalog.get_all_items())
+
 # Callback function that will update the output container based on input
 def register_callbacks(app):
-    @app.callback(Output("cog-map-layer", "url"), Input("colormap-dropdown", "value"))
-    def update_cog_layer(colormap):
+    @app.callback(Output("cog-map-layer", "url"), Input("colormap-dropdown", "value"), Input("stac-item-dropdown", "value"))
+    def update_cog_layer(colormap, selected_item_id):
         hemisphere = "north"
         forecast_date = "2024-11-12"
         leadtime = 0
         logging.debug(f"Colormap changed to {colormap}")
-        # Standard COG endpoint
-        # cog_tile_url = f"{TITILER_URL}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={COG_FILENAME}&colormap_name={colormap}&rescale=0,1"
-        # STAC + TileJSON endpoint
-        request_url = f"{TITILER_URL}/tiles/{hemisphere}/{forecast_date}/{leadtime}/tilejson.json"
-        tilejson = requests.get(request_url).json()
-        cog_tile_url = tilejson["tiles"][0] + f"&colormap_name={colormap}&rescale=0,1"
-        print(colormap, cog_tile_url)
 
-        return cog_tile_url
+        print(f"Selected item {selected_item_id}")
+        if not selected_item_id:
+            return no_update  # No tiles to display
+
+        # Find the selected item
+        selected_item = next((item for item in items if item.id == selected_item_id), None)
+        if not selected_item:
+            return no_update
+        print(selected_item)
+
+        # Get the tile URL from Titiler
+        tile_url = get_tile_url(selected_item) + f"&colormap_name={colormap}&rescale=0,1"
+        return tile_url
+
+
+
+        # # Standard COG endpoint
+        # cog_tile_url = f"{TITILER_URL}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={COG_FILENAME}&colormap_name={colormap}&rescale=0,1"
+
+        # STAC + TileJSON endpoint
+        # request_url = f"{TITILER_URL}/tiles/{hemisphere}/{forecast_date}/{leadtime}/tilejson.json"
+        # tilejson = requests.get(request_url).json()
+        # cog_tile_url = tilejson["tiles"][0] + f"&colormap_name={colormap}&rescale=0,1"
+
+        # request_url = f"{TITILER_URL}/stac/forecast-{forecast_date}/tilejson.json"
+        # tilejson = requests.get(request_url).json()
+        # print(tilejson)
+        # cog_tile_url = tilejson["tiles"][0] + f"&colormap_name={colormap}&rescale=0,1"
+        # print(colormap, cog_tile_url)
+
+        # return cog_tile_url
+
+        # # request_url = f"{TITILER_URL}/stac/forecast-{forecast_date}/tilejson.json"
+        # request_url = f"{TITILER_URL}/stac/WebMercatorQuad/tilejson.json"
+        # # request_url = f"{TITILER_URL}/stac/tiles/forecast-{forecast_date}/tilejson.json"
+        # return request_url
 
     @app.callback(Output("cog-map-layer", "opacity"), Input("opacity-slider", "value"))
     def update_cog_layer_opacity(opacity):

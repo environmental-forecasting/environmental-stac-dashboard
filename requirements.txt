@@ -6,3 +6,4 @@ dash_iconify
 dash-leaflet
 dash_mantine_components
 gunicorn
+pystac

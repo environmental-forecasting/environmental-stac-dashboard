@@ -11,13 +11,14 @@ TITILER_URL = "http://localhost:8000"
 
 
 def get_colormaps():
+    AVAILABLE_COLORMAPS = ["blues_r", "cividis", "inferno", "magma", "plasma", "viridis"]
     try:
         url = f"{TITILER_URL}/utils/colormaps"
         response = requests.get(url)
-        AVAILABLE_COLORMAPS = sorted(response.json())
+        if response.ok:
+            AVAILABLE_COLORMAPS = sorted(response.json())
     except requests.exceptions.RequestException:
         print("No response...")
-        AVAILABLE_COLORMAPS = ["plasma", "cividis", "inferno", "magma", "viridis"]
     return AVAILABLE_COLORMAPS
 
 def get_forecast_start_dates():
@@ -29,6 +30,20 @@ def get_forecast_start_dates():
         print("No response...")
         AVAILABLE_START_DATES   = ["2024-11-12"]
     return AVAILABLE_START_DATES
+
+def get_forecast_file(file_list, date, leadtime=0):
+    try:
+        url  = f"{TITILER_URL}/manifest/forecast_files"
+        response   = requests.get(url)
+        AVAILABLE_FILES    = sorted(response.json())
+    except requests.exceptions.RequestException:
+        print("No response...")
+
+# Load the STAC catalog
+import pystac
+# catalog = pystac.Catalog.from_file("data/stac/catalog.json")
+catalog = pystac.Catalog.from_file("http://localhost:8002/data/stac/catalog.json")
+items = list(catalog.get_all_items())
 
 variables = ["SIC Mean", "SIC Std Dev"]
 AVAILABLE_COLORMAPS = get_colormaps()
@@ -80,13 +95,13 @@ leaflet_map = html.Div(
                         ),
                     ]
                 ),
-                dl.Colorbar(
-                    id="cbar",
-                    width=150,
-                    height=20,
-                    style={"margin-left": "40px"},
-                    position="bottomleft",
-                ),
+                # dl.Colorbar(
+                #     id="cbar",
+                #     width=150,
+                #     height=20,
+                #     style={"margin-left": "40px"},
+                #     position="bottomleft",
+                # ),
                 dl.ScaleControl(position="bottomright"),
                 dl.FullScreenControl(),
             ],
@@ -100,6 +115,11 @@ leaflet_map = html.Div(
         # Controls for map manipulation
         html.Div(
             [
+                dcc.Dropdown(
+                    id="stac-item-dropdown",
+                    options=[{"label": item.id, "value": item.id} for item in items],
+                    placeholder="Select a STAC Item"
+                ),
                 html.Label("Select Date:"),
                 # dmc.DatePickerInput(w=200, numberOfColumns=1),
                 dcc.DatePickerSingle(
