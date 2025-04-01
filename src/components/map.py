@@ -1,18 +1,25 @@
 import datetime as dt
+import logging
+import sys
+
 import dash_leaflet as dl
-import requests
-from dash import dcc, html
 import dash_mantine_components as dmc
+import pandas as pd
+import pystac
+import requests
+from config import CATALOG_PATH, TITILER_URL
+from dash import dcc, html
+from rio_tiler.colormap import ColorMaps
+from stac.process import get_all_forecast_start_dates
 
 # Default settings
 DEFAULT_CENTER = [0, 0]
 DEFAULT_ZOOM = 2
-TITILER_URL = "http://localhost:8000"
-
 
 def get_colormaps():
-    AVAILABLE_COLORMAPS = ["blues_r", "cividis", "inferno", "magma", "plasma", "viridis"]
+    AVAILABLE_COLORMAPS = ColorMaps().list()
     try:
+        # Get from Titiler extended API if available
         url = f"{TITILER_URL}/utils/colormaps"
         response = requests.get(url)
         if response.ok:
@@ -21,33 +28,34 @@ def get_colormaps():
         print("No response...")
     return AVAILABLE_COLORMAPS
 
-def get_forecast_start_dates():
-    try:
-        url = f"{TITILER_URL}/manifest/forecast_start_dates"
-        response  = requests.get(url)
-        AVAILABLE_START_DATES  = sorted(response.json())
-    except requests.exceptions.RequestException:
-        print("No response...")
-        AVAILABLE_START_DATES   = ["2024-11-12"]
-    return AVAILABLE_START_DATES
+forecast_start_dates = sorted(get_all_forecast_start_dates(CATALOG_PATH, hemisphere="north"))
+items = []
 
-def get_forecast_file(file_list, date, leadtime=0):
-    try:
-        url  = f"{TITILER_URL}/manifest/forecast_files"
-        response   = requests.get(url)
-        AVAILABLE_FILES    = sorted(response.json())
-    except requests.exceptions.RequestException:
-        print("No response...")
+if forecast_start_dates:
+    # Define start and end dates for available IceNet forecasts
+    logging.debug("Forecast start dates available:", forecast_start_dates)
+    # Note to self: Dates should be in format 'YYYY-MM-DD'
+    min_date_allowed=forecast_start_dates[0]
+    max_date_allowed=forecast_start_dates[-1]
+    initial_visible_month=max_date_allowed
 
-# Load the STAC catalog
-import pystac
-# catalog = pystac.Catalog.from_file("data/stac/catalog.json")
-catalog = pystac.Catalog.from_file("http://localhost:8002/data/stac/catalog.json")
-items = list(catalog.get_all_items())
+    logging.debug("min_date_allowed", min_date_allowed)
+    logging.debug("max_date_allowed", max_date_allowed)
 
-variables = ["SIC Mean", "SIC Std Dev"]
+    # Create list of days we don't have forecasts for, so, we can disable them in date picker.
+    date_range = pd.date_range(min_date_allowed, max_date_allowed, freq="D")
+    disabled_days = date_range[~date_range.isin(forecast_start_dates)]
+    logging.debug(f"Creating list of dates starting from {min_date_allowed} to {max_date_allowed}")
+    logging.debug("Disabled days:", disabled_days)
+else:
+    min_date_allowed = None
+    max_date_allowed = None
+    initial_visible_month = None
+    disabled_days = None
+
+
+variables = ["SIC Mean", "SIC Stddev"]
 AVAILABLE_COLORMAPS = get_colormaps()
-AVAILABLE_START_DATES = get_forecast_start_dates()
 
 leaflet_map = html.Div(
     # style={'width': 'inherit', 'height': 'inherit'},
@@ -58,7 +66,7 @@ leaflet_map = html.Div(
                 dl.LayersControl(
                     [
                         dl.BaseLayer(
-                            dl.TileLayer(zIndex=0),
+                            dl.TileLayer(attribution=("© OpenStreetMap contributors"), zIndex=0),
                             name="OpenStreetMap",
                             checked=True,
                         ),
@@ -120,14 +128,15 @@ leaflet_map = html.Div(
                     options=[{"label": item.id, "value": item.id} for item in items],
                     placeholder="Select a STAC Item"
                 ),
-                html.Label("Select Date:"),
+                html.Label("Select Forecast Start Date:"),
                 # dmc.DatePickerInput(w=200, numberOfColumns=1),
                 dcc.DatePickerSingle(
                     id="forecast-init-date-picker",
-                    min_date_allowed=dt.date(2020, 1, 1),
-                    max_date_allowed=dt.datetime.today().date() - dt.timedelta(days=6),
-                    initial_visible_month=dt.datetime.today().date(),
+                    min_date_allowed=min_date_allowed,
+                    max_date_allowed=max_date_allowed,
+                    initial_visible_month=initial_visible_month,
                     display_format='YYYY-MM-DD',
+                    disabled_days=disabled_days,
                     # start_date_placeholder_text='MMM Do, YY'
                 ),
                 html.Label("Select Variable:"),
@@ -155,6 +164,19 @@ leaflet_map = html.Div(
                     persistence="True",
                     persistence_type="memory",
                     # marks={0: '0', 0.2: '0.2', 0.4: '0.4', 0.6: '0.6', 0.8: '0.8', 1: '1'},
+                ),
+                html.Label("Leadtime:"),
+                dcc.Slider(
+                    id="leadtime-slider",
+                    min=0,
+                    max=92,
+                    step=1,
+                    value=0,
+                    updatemode="drag",
+                    persistence="True",
+                    persistence_type="memory",
+                    marks=None,
+                    tooltip={"placement": "bottom", "always_visible": True},
                 ),
             ],
             style={
