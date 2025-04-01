@@ -63,41 +63,7 @@ leaflet_map = html.Div(
     children=[
         dl.Map(
             [
-                dl.LayersControl(
-                    [
-                        dl.BaseLayer(
-                            dl.TileLayer(attribution=("© OpenStreetMap contributors"), zIndex=0),
-                            name="OpenStreetMap",
-                            checked=True,
-                        ),
-                        dl.BaseLayer(
-                            dl.TileLayer(
-                                url="https://watercolormaps.collection.cooperhewitt.org/tile/watercolor/{z}/{x}/{y}.jpg",
-                                minZoom=0,
-                                maxZoom=20,
-                                attribution=(
-                                    "Map tiles by Stamen Design, under CC BY 3.0. Data by OpenStreetMap, under CC BY SA."
-                                ),
-                                zIndex=0,
-                            ),
-                            name="Stamen Watercolour",
-                            checked=False,
-                        ),
-                        dl.BaseLayer(
-                            dl.TileLayer(
-                                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                                minZoom=0,
-                                maxZoom=20,
-                                attribution=(
-                                    r"Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"
-                                ),
-                                zIndex=0,
-                            ),
-                            name="ESRI: World Imagery",
-                            checked=False,
-                        ),
-                    ]
-                ),
+                dl.TileLayer(id="map-base-layer", attribution=("© OpenStreetMap contributors"), zIndex=0),
                 dl.LayersControl([], id="cog-results-layer"),
                 # dl.Colorbar(
                 #     id="cbar",
