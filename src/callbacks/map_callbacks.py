@@ -1,8 +1,10 @@
 import logging
+
+import dash_leaflet as dl
 import requests
-from stac.process import get_cog_path, get_collections, get_leadtime
-from dash import Input, Output, no_update
 from config import CATALOG_PATH, DATA_URL, TITILER_URL
+from dash import ALL, MATCH, Input, Output, State, no_update
+from stac.process import get_cog_path, get_collections, get_leadtime
 
 COG_FILENAME = "sample.tif"
 
@@ -28,30 +30,44 @@ def get_tile_url(cog_path):
 
 # Callback function that will update the output container based on input
 def register_callbacks(app):
-    @app.callback(Output("cog-map-layer", "url"), Input("colormap-dropdown", "value"), Input("forecast-init-date-picker", "date"), Input("leadtime-slider", "value"))
+
+    @app.callback(Output("cog-results-layer", "children"), Input("colormap-dropdown", "value"), Input("forecast-init-date-picker", "date"), Input("leadtime-slider", "value"), prevent_initial_call=True)
     def update_cog_layer(colormap, forecast_start_date, leadtime=0):
-        hemisphere = "north"
-        # forecast_date = "2024-11-12"
-        # leadtime = 0
-        logging.debug(f"Colormap changed to {colormap}")
+        collections = get_collections(CATALOG_PATH)
+        tile_layers = []
+        for i, collection_id in enumerate(collections):
+            logging.debug("collections", collections)
+            logging.debug(f"Colormap changed to {colormap}")
 
-        print(f"Selected item {forecast_start_date}")
-        if not forecast_start_date:
-            return no_update  # No tiles to display
+            print(f"Selected item {forecast_start_date}")
+            if not forecast_start_date:
+                return no_update  # No tiles to display
 
-        # # Find the selected item
-        # selected_item = next((item for item in items if item.id == selected_item_id), None)
-        # if not selected_item:
-        #     return no_update
-        # print(selected_item)
-        # selected_item = get_leadtime(CATALOG_PATH, hemisphere, forecast_start_date, leadtime)
-        selected_item = get_cog_path(CATALOG_PATH, hemisphere, forecast_start_date, leadtime)
-        print("This is the selected_item:", selected_item)
+            selected_item = get_cog_path(CATALOG_PATH, collection_id, forecast_start_date, leadtime)
+            if selected_item:
+                logging.debug("This is the selected_item:", selected_item)
 
-        # Get the tile URL from Titiler
-        tile_url = get_tile_url(selected_item) + f"&colormap_name={colormap}&rescale=0,1"
-        print("tile_url:", tile_url)
-        return tile_url
+                # Get the tile URL from Titiler
+                tile_url = get_tile_url(selected_item) + f"&colormap_name={colormap}&rescale=0,1"
+                logging.debug("tile_url:", tile_url)
+
+                collection_layer = dl.Overlay(
+                    dl.TileLayer(
+                        id={
+                            'type': 'cog-collections',
+                            'index': i
+                        },
+                        url=tile_url,
+                        zIndex=100,
+                        opacity=1,
+                        ),
+                    name=collection_id,
+                    checked=True,
+                )
+
+                tile_layers.append(collection_layer)
+
+        return tile_layers
 
 
 
@@ -76,8 +92,8 @@ def register_callbacks(app):
         # # request_url = f"{TITILER_URL}/stac/tiles/forecast-{forecast_date}/tilejson.json"
         # return request_url
 
-    @app.callback(Output("cog-map-layer", "opacity"), Input("opacity-slider", "value"))
-    def update_cog_layer_opacity(opacity):
+    @app.callback(Output({'type': 'cog-collections', 'index': ALL}, 'opacity'), Input("opacity-slider", "value"), State({'type': 'cog-collections', 'index': ALL}, 'opacity'))
+    def update_cog_layer_opacity(opacity, current_opacity):
         logging.debug(f"Opacity changed to {opacity}")
 
-        return opacity
+        return [opacity]*len(current_opacity)

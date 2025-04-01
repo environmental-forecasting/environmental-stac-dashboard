@@ -96,13 +96,9 @@ leaflet_map = html.Div(
                             name="ESRI: World Imagery",
                             checked=False,
                         ),
-                        dl.Overlay(
-                            dl.TileLayer(id="cog-map-layer", zIndex=1, opacity=1.0,),
-                            name="Results Layer",
-                            checked=True,
-                        ),
                     ]
                 ),
+                dl.LayersControl([], id="cog-results-layer"),
                 # dl.Colorbar(
                 #     id="cbar",
                 #     width=150,
