@@ -85,12 +85,7 @@ leaflet_map = html.Div(
         # Controls for map manipulation
         html.Div(
             [
-                dcc.Dropdown(
-                    id="stac-item-dropdown",
-                    options=[{"label": item.id, "value": item.id} for item in items],
-                    placeholder="Select a STAC Item"
-                ),
-                html.Label("Select Forecast Start Date:"),
+                html.Label("Select Forecast Start:"),
                 # dmc.DatePickerInput(w=200, numberOfColumns=1),
                 dcc.DatePickerSingle(
                     id="forecast-init-date-picker",
