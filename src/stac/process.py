@@ -96,7 +96,6 @@ def get_leadtimes(catalog_path: str, collection_id: str, forecast_start_date: st
         # forecast_start, forecast_end = forecast_collection.extent.temporal.intervals[0]
         forecast_time_interval = np.concatenate(forecast_collection.extent.temporal.intervals)
         forecast_start, forecast_end = [time.strftime('%Y-%m-%d') for time in forecast_time_interval]
-        # print(forecast_start, forecast_start_date)
         if forecast_start == forecast_start_date:
             # print("forecast_collection", forecast_collection.get_items())
             return forecast_collection.get_items()
@@ -111,7 +110,7 @@ def get_leadtimes(catalog_path: str, collection_id: str, forecast_start_date: st
 
     # return leadtimes
 
-    return forecast_collection.get_items()
+    # return forecast_collection.get_items()
 
 
 def get_leadtime(catalog_path: str, collection_id: str, forecast_start_date: str, leadtime: int):
@@ -125,9 +124,10 @@ def get_leadtime(catalog_path: str, collection_id: str, forecast_start_date: str
         leadtime: Forecast lead time.
     """
     forecast_collection = get_leadtimes(catalog_path, collection_id, forecast_start_date)
-    for forecast in forecast_collection:
-        if forecast.properties["leadtime"] == leadtime:
-            return forecast#.get_assets()#["geotiff"].href
+    if forecast_collection:
+        for forecast in forecast_collection:
+            if forecast.properties["leadtime"] == leadtime:
+                return forecast#.get_assets()#["geotiff"].href
 
 
 def get_cog_path(catalog_path: str, collection_id: str, forecast_start_date: str, leadtime: int):
@@ -140,7 +140,8 @@ def get_cog_path(catalog_path: str, collection_id: str, forecast_start_date: str
         forecast_start_date: Forecast start time in "YYYY-MM-DD" format.
         leadtime: Forecast lead time.
     """
-    forecast_collection = get_leadtimes(catalog_path, collection_id, forecast_start_date)
-    for forecast in forecast_collection:
-        if forecast.properties["leadtime"] == leadtime:
-            return forecast.get_assets()["geotiff"].href
+    forecast_leadtime_collection = get_leadtimes(catalog_path, collection_id, forecast_start_date)
+    if forecast_leadtime_collection:
+        for forecast in forecast_leadtime_collection:
+            if forecast.properties["leadtime"] == leadtime:
+                return forecast.get_assets()["geotiff"].href

@@ -45,7 +45,7 @@ def register_callbacks(app):
 
             selected_item = get_cog_path(CATALOG_PATH, collection_id, forecast_start_date, leadtime)
             if selected_item:
-                logging.debug("This is the selected_item:", selected_item)
+                logging.debug("This is the selected_item:", selected_item, "in collection:", collection_id)
 
                 # Get the tile URL from Titiler
                 tile_url = get_tile_url(selected_item) + f"&colormap_name={colormap}&rescale=0,1"
