@@ -1,6 +1,6 @@
 import logging
 import requests
-from stac.process import get_cog_path, get_leadtime
+from stac.process import get_cog_path, get_collections, get_leadtime
 from dash import Input, Output, no_update
 from config import CATALOG_PATH, DATA_URL, TITILER_URL
 

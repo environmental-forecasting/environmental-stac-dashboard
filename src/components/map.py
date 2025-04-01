@@ -28,7 +28,7 @@ def get_colormaps():
         print("No response...")
     return AVAILABLE_COLORMAPS
 
-forecast_start_dates = sorted(get_all_forecast_start_dates(CATALOG_PATH, hemisphere="north"))
+forecast_start_dates = sorted(get_all_forecast_start_dates(CATALOG_PATH, collection_id="north"))
 items = []
 
 if forecast_start_dates:
