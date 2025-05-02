@@ -5,19 +5,8 @@ from rio_tiler.colormap import ColorMaps
 # Default settings
 DEFAULT_CENTER = [0, 0]
 DEFAULT_ZOOM = 2
-
-def get_colormaps() -> list[str]:
-    """
-    Returns the list of available colormaps.
-
-    Returns:
-        A list of available colormap names.
-    """
-    AVAILABLE_COLORMAPS = ColorMaps().list()
-    return AVAILABLE_COLORMAPS
-
-variables = ["SIC Mean"]
-AVAILABLE_COLORMAPS = get_colormaps()
+AVAILABLE_COLORMAPS = ColorMaps().list()
+VARIABLES = ["SIC Mean"]
 
 leaflet_map = html.Div(
     # style={'width': 'inherit', 'height': 'inherit'},
@@ -61,8 +50,8 @@ leaflet_map = html.Div(
                 html.Label("Select Variable:"),
                 dcc.Dropdown(
                     id="variable-dropdown",
-                    options=[{"label": var, "value": var} for var in variables],
-                    value=variables[0],
+                    options=[{"label": var, "value": var} for var in VARIABLES],
+                    value=VARIABLES[0],
                     clearable=False,
                 ),
                 html.Label("Select Colormap:"),
