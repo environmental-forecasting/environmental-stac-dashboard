@@ -25,7 +25,7 @@ def normalise_url_path(url: str) -> str:
     if parts.path.endswith("/") and not normalised_path.endswith("/"):
         normalised_path += "/"
 
-    # Rebuild and return the normalized URL
+    # Rebuild and return the normalised URL
     return urlunparse(parts._replace(path=normalised_path))
 
 

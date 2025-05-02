@@ -4,6 +4,28 @@ import numpy as np
 
 from pystac import Catalog
 
+
+def get_catalog(catalog_path: str) -> Catalog:
+    """
+    Retrieve STAC catalog.
+
+    Args:
+        catalog_path: Path to the STAC catalog JSON file.
+
+    Returns:
+        The STAC catalog object.
+    """
+    # Load the STAC catalog
+    try:
+        catalog = Catalog.from_file(catalog_path)
+        return catalog
+    except FileNotFoundError:
+        logging.error("STAC catalog file not found.")
+        return set()
+    except:
+        logging.error("Error loading STAC catalog")
+        return set()
+
 def get_collections(catalog_path: str) -> list[str]:
     """
     Retrieve all collections within the STAC catalog.
@@ -14,15 +36,7 @@ def get_collections(catalog_path: str) -> list[str]:
     Returns:
         A list of collection id's in the catalog.
     """
-    # Load the STAC catalog
-    try:
-        catalog = Catalog.from_file(catalog_path)
-    except FileNotFoundError:
-        logging.error("STAC catalog file not found.")
-        return set()
-    except:
-        logging.error("Error loading STAC catalog")
-        return set()
+    catalog = get_catalog(catalog_path)
 
     return [collection.id for collection in catalog.get_children()]
 
@@ -38,15 +52,7 @@ def get_all_forecast_start_dates(catalog_path: str, collection_id: str) -> set[s
     Returns:
         A set of unique forecast_start_date values in "YYYY-MM-DD" format.
     """
-    # Load the STAC catalog
-    try:
-        catalog = Catalog.from_file(catalog_path)
-    except FileNotFoundError:
-        logging.error("STAC catalog file not found.")
-        return set()
-    except:
-        logging.error("Error loading STAC catalog")
-        return set()
+    catalog = get_catalog(catalog_path)
 
     # Find the hemisphere collection
     collection = next(
@@ -78,8 +84,7 @@ def get_leadtimes(catalog_path: str, collection_id: str, forecast_start_date: st
     Returns:
         List of leadtimes for the specified collection and forecast start time.
     """
-    # Load the STAC catalog
-    catalog = Catalog.from_file(catalog_path)
+    catalog = get_catalog(catalog_path)
 
     # Find the hemisphere collection
     collection = next(
