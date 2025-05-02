@@ -1,13 +1,8 @@
-import datetime as dt
 import logging
-import sys
 
 import dash_leaflet as dl
-import dash_mantine_components as dmc
 import pandas as pd
-import pystac
-import requests
-from config import CATALOG_PATH, TITILER_URL
+from config import CATALOG_PATH
 from dash import dcc, html
 from rio_tiler.colormap import ColorMaps
 from stac.process import get_all_forecast_start_dates
@@ -18,14 +13,6 @@ DEFAULT_ZOOM = 2
 
 def get_colormaps():
     AVAILABLE_COLORMAPS = ColorMaps().list()
-    try:
-        # Get from Titiler extended API if available
-        url = f"{TITILER_URL}/utils/colormaps"
-        response = requests.get(url)
-        if response.ok:
-            AVAILABLE_COLORMAPS = sorted(response.json())
-    except requests.exceptions.RequestException:
-        print("No response...")
     return AVAILABLE_COLORMAPS
 
 forecast_start_dates = sorted(get_all_forecast_start_dates(CATALOG_PATH, collection_id="north"))
