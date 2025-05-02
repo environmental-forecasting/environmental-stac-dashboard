@@ -8,10 +8,33 @@ from stac.process import get_cog_path, get_collections, get_leadtime
 
 COG_FILENAME = "sample.tif"
 
+import os
+from urllib.parse import urlparse, urlunparse
+
+def normalise_url_path(url: str) -> str:
+    """
+    Normalise the path part of a URL by resolving `.` and `..`.
+
+    Args:
+        url: The original URL.
+
+    Returns:
+        The normalised URL.
+    """
+    parts = urlparse(url)
+    normalised_path = os.path.normpath(parts.path)
+
+    # Preserve trailing slash if it was present in the original URL
+    if parts.path.endswith("/") and not normalised_path.endswith("/"):
+        normalised_path += "/"
+
+    # Rebuild and return the normalized URL
+    return urlunparse(parts._replace(path=normalised_path))
+
 
 # Function to generate tile URL for a STAC Item
 def get_tile_url(cog_path):
-    cog_path = f"{DATA_URL}/{cog_path}"
+    cog_path = normalise_url_path(f"{DATA_URL}/{cog_path}")
     return f"{TITILER_URL}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={cog_path}"
 
 # Function to generate tile URL for a STAC Item
@@ -49,6 +72,7 @@ def register_callbacks(app):
 
                 # Get the tile URL from Titiler
                 tile_url = get_tile_url(selected_item) + f"&colormap_name={colormap}&rescale=0,1"
+                tile_url = normalise_url_path(tile_url)
                 logging.debug("tile_url:", tile_url)
 
                 collection_layer = dl.Overlay(
