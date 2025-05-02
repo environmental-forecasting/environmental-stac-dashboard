@@ -1,10 +1,6 @@
-import logging
-
 import dash_leaflet as dl
-from config import CATALOG_PATH
 from dash import dcc, html
 from rio_tiler.colormap import ColorMaps
-from stac.process import get_all_forecast_start_dates
 
 # Default settings
 DEFAULT_CENTER = [0, 0]
