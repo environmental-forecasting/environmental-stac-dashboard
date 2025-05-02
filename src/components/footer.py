@@ -6,7 +6,7 @@ footer_layout = html.Footer(
     className="site-footer",
     children=[
         html.Div(
-            className="bsk-footer bsk-footer-default m-0 pb-3",
+            className="bsk-footer bsk-footer-default m-0",
             children=[
                 html.Div(
                     className="bsk-container",
