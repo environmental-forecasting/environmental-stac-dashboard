@@ -6,4 +6,7 @@ dash_iconify
 dash-leaflet
 dash_mantine_components
 gunicorn
+pandas
 pystac
+rio-tiler
+rioxarray
