@@ -2,11 +2,17 @@ import dash_leaflet as dl
 from dash import dcc, html
 from rio_tiler.colormap import ColorMaps
 
+
 # Default settings
 DEFAULT_CENTER = [0, 0]
 DEFAULT_ZOOM = 2
 AVAILABLE_COLORMAPS = ColorMaps().list()
+DEFAULT_COLORMAP = "blues_r"
 VARIABLES = ["SIC Mean"]
+
+# Blues_r for colourbar which uses different input to titiler's approach to colour:
+blues_r = ["#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b"]
+blues_r.reverse()
 
 leaflet_map = html.Div(
     # style={'width': 'inherit', 'height': 'inherit'},
@@ -16,15 +22,17 @@ leaflet_map = html.Div(
             [
                 dl.TileLayer(id="map-base-layer", attribution=("© OpenStreetMap contributors"), zIndex=0),
                 dl.LayersControl([], id="cog-results-layer"),
-                # dl.Colorbar(
-                #     id="cbar",
-                #     width=150,
-                #     height=20,
-                #     style={"margin-left": "40px"},
-                #     position="bottomleft",
-                # ),
+                dl.Colorbar(
+                    id="cbar",
+                    width=30,
+                    height=200,
+                    style={"opacity": "1.0"},
+                    position="topleft",
+                    tooltip=True,
+                    colorscale=blues_r,
+                ),
                 dl.ScaleControl(position="bottomright"),
-                dl.FullScreenControl(),
+                dl.FullScreenControl(position="bottomleft"),
             ],
             crs="EPSG3857",
             attributionControl=True,
@@ -58,7 +66,7 @@ leaflet_map = html.Div(
                 dcc.Dropdown(
                     id="colormap-dropdown",
                     options=[{"label": col, "value": col} for col in AVAILABLE_COLORMAPS],
-                    value="blues_r",
+                    value=DEFAULT_COLORMAP,
                     clearable=False,
                 ),
                 html.Label("Opacity Control:"),

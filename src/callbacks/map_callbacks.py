@@ -9,6 +9,8 @@ from stac.process import get_all_forecast_start_dates, get_cog_path, get_collect
 import os
 from urllib.parse import urlparse, urlunparse
 
+from .utils import convert_colormap_to_colorscale
+
 
 def normalise_url_path(url: str) -> str:
     """
@@ -113,7 +115,13 @@ def register_callbacks(app: dash.Dash):
             disabled_days
         ]
 
-    @app.callback(Output("cog-results-layer", "children"), Input("colormap-dropdown", "value"), Input("forecast-init-date-picker", "date"), Input("leadtime-slider", "value"), prevent_initial_call=True)
+    @app.callback(
+        Output("cog-results-layer", "children"),
+        Input("colormap-dropdown", "value"),
+        Input("forecast-init-date-picker", "date"),
+        Input("leadtime-slider", "value"),
+        prevent_initial_call=True,
+    )
     def update_cog_layer(colormap: str, forecast_start_date: str, leadtime: int = 0):
         """
         Updates the COG layers on the map based on selected colormap, date, and leadtime.
@@ -163,6 +171,20 @@ def register_callbacks(app: dash.Dash):
                 tile_layers.append(collection_layer)
 
         return tile_layers
+
+
+    @app.callback(
+        Output("cbar", "colorscale"),
+        Input("cbar", "colorscale"),
+        Input("colormap-dropdown", "value"),
+        prevent_initial_call=True,
+    )
+    def show_cbar(colorscale, colormap):
+        if colormap:
+            colorscale = convert_colormap_to_colorscale(colormap)
+            return colorscale
+        else:
+            return colorscale
 
 
     @app.callback(Output({'type': 'cog-collections', 'index': ALL}, 'opacity'), Input("opacity-slider", "value"), State({'type': 'cog-collections', 'index': ALL}, 'opacity'))
