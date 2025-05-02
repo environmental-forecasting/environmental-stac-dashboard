@@ -19,7 +19,7 @@ layout = dmc.MantineProvider(
             dbc.Row(dbc.Col(header.header_layout, width=12)),
             dbc.Row(
                 [
-                    dbc.Col(sidebar.sidebar_layout, width=2),
+                    # dbc.Col(sidebar.sidebar_layout, width=0),
                     dbc.Col(
                         html.Div(
                             map.leaflet_map,
@@ -28,7 +28,7 @@ layout = dmc.MantineProvider(
                                 "flex": "1",  # Make sure the map takes available space in the column
                             },
                         ),
-                        width=10,
+                        width=12,
                     ),
                 ],
                 className="g-0",
