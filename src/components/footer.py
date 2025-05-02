@@ -100,6 +100,7 @@ footer_layout = html.Footer(
                     ],
                 ),
             ],
+            style={"padding-bottom": "2rem"},
         )
     ],
 )
