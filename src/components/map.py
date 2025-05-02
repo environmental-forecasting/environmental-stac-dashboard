@@ -54,7 +54,7 @@ else:
     disabled_days = None
 
 
-variables = ["SIC Mean", "SIC Stddev"]
+variables = ["SIC Mean"]
 AVAILABLE_COLORMAPS = get_colormaps()
 
 leaflet_map = html.Div(
