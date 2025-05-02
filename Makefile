@@ -1,4 +1,4 @@
-TAG = "dev"
+TAG ?= "dev"
 IMAGE_NAME = "icenet-dashboard/plotly-dash-web-dashboard:$(TAG)"
 
 build:
