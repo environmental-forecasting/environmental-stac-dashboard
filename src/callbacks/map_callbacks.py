@@ -1,13 +1,14 @@
 import logging
-
 import dash
 import dash_leaflet as dl
+import pandas as pd
 from config import CATALOG_PATH, DATA_URL, TITILER_URL
 from dash import ALL, MATCH, Input, Output, State, no_update
-from stac.process import get_cog_path, get_collections, get_leadtime
+from stac.process import get_all_forecast_start_dates, get_cog_path, get_collections, get_leadtime
 
 import os
 from urllib.parse import urlparse, urlunparse
+
 
 def normalise_url_path(url: str) -> str:
     """
@@ -56,6 +57,62 @@ def register_callbacks(app: dash.Dash):
     Args:
         The Dash app instance.
     """
+
+    @app.callback(
+        [Output("forecast-start-dates-store", "data"),
+        Output("forecast-init-date-picker", "min_date_allowed"),
+        Output("forecast-init-date-picker", "max_date_allowed"),
+        Output("forecast-init-date-picker", "initial_visible_month"),
+        Output("forecast-init-date-picker", "disabled_days")],
+        [Input("page-load-trigger", "data")],
+    )
+    def update_forecast_start_dates(_) -> list[list[str], str|None, str|None, str|None, pd.DatetimeIndex|None]:
+        """
+        This function retrieves and processes IceNet forecast start dates from the STAC Catalog.
+        It returns a list containing sorted forecast start dates, min/max allowed dates,
+        initial visible month, and disabled days for the date picker.
+
+        Returns:
+            A list containing:
+                - Sorted forecast start dates
+                - Minimum allowed date
+                - Maximum allowed date
+                - Initial visible month
+                - Disabled days for the date picker
+        """
+        forecast_start_dates = sorted(get_all_forecast_start_dates(CATALOG_PATH, collection_id="north"))
+
+        if forecast_start_dates:
+            # Define start and end dates for available IceNet forecasts
+            logging.debug("Forecast start dates available:", forecast_start_dates)
+            # Note to self: Dates should be in format 'YYYY-MM-DD'
+            min_date_allowed=forecast_start_dates[0]
+            max_date_allowed=forecast_start_dates[-1]
+            initial_visible_month=max_date_allowed
+
+            logging.debug("min_date_allowed", min_date_allowed)
+            logging.debug("max_date_allowed", max_date_allowed)
+
+            # Create list of days we don't have forecasts for, so, we can disable them in date picker.
+            date_range = pd.date_range(min_date_allowed, max_date_allowed, freq="D")
+            disabled_days = date_range[~date_range.isin(forecast_start_dates)]
+            logging.debug(f"Creating list of dates starting from {min_date_allowed} to {max_date_allowed}")
+            logging.debug("Disabled days:", disabled_days)
+        else:
+            min_date_allowed = None
+            max_date_allowed = None
+            initial_visible_month = None
+            disabled_days = None
+            logging.debug("No forecast dates loaded, issue connecting to/loading STAC Catalog?")
+
+        return [
+            forecast_start_dates,
+            min_date_allowed,
+            max_date_allowed,
+            initial_visible_month,
+            disabled_days
+        ]
+
     @app.callback(Output("cog-results-layer", "children"), Input("colormap-dropdown", "value"), Input("forecast-init-date-picker", "date"), Input("leadtime-slider", "value"), prevent_initial_call=True)
     def update_cog_layer(colormap: str, forecast_start_date: str, leadtime: int = 0):
         """

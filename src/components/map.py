@@ -1,7 +1,6 @@
 import logging
 
 import dash_leaflet as dl
-import pandas as pd
 from config import CATALOG_PATH
 from dash import dcc, html
 from rio_tiler.colormap import ColorMaps
@@ -11,35 +10,15 @@ from stac.process import get_all_forecast_start_dates
 DEFAULT_CENTER = [0, 0]
 DEFAULT_ZOOM = 2
 
-def get_colormaps():
+def get_colormaps() -> list[str]:
+    """
+    Returns the list of available colormaps.
+
+    Returns:
+        A list of available colormap names.
+    """
     AVAILABLE_COLORMAPS = ColorMaps().list()
     return AVAILABLE_COLORMAPS
-
-forecast_start_dates = sorted(get_all_forecast_start_dates(CATALOG_PATH, collection_id="north"))
-items = []
-
-if forecast_start_dates:
-    # Define start and end dates for available IceNet forecasts
-    logging.debug("Forecast start dates available:", forecast_start_dates)
-    # Note to self: Dates should be in format 'YYYY-MM-DD'
-    min_date_allowed=forecast_start_dates[0]
-    max_date_allowed=forecast_start_dates[-1]
-    initial_visible_month=max_date_allowed
-
-    logging.debug("min_date_allowed", min_date_allowed)
-    logging.debug("max_date_allowed", max_date_allowed)
-
-    # Create list of days we don't have forecasts for, so, we can disable them in date picker.
-    date_range = pd.date_range(min_date_allowed, max_date_allowed, freq="D")
-    disabled_days = date_range[~date_range.isin(forecast_start_dates)]
-    logging.debug(f"Creating list of dates starting from {min_date_allowed} to {max_date_allowed}")
-    logging.debug("Disabled days:", disabled_days)
-else:
-    min_date_allowed = None
-    max_date_allowed = None
-    initial_visible_month = None
-    disabled_days = None
-
 
 variables = ["SIC Mean"]
 AVAILABLE_COLORMAPS = get_colormaps()
@@ -76,11 +55,11 @@ leaflet_map = html.Div(
                 # dmc.DatePickerInput(w=200, numberOfColumns=1),
                 dcc.DatePickerSingle(
                     id="forecast-init-date-picker",
-                    min_date_allowed=min_date_allowed,
-                    max_date_allowed=max_date_allowed,
-                    initial_visible_month=initial_visible_month,
-                    display_format='YYYY-MM-DD',
-                    disabled_days=disabled_days,
+                    # min_date_allowed=min_date_allowed,
+                    # max_date_allowed=max_date_allowed,
+                    # initial_visible_month=initial_visible_month,
+                    display_format="YYYY-MM-DD",
+                    # disabled_days=disabled_days,
                     # start_date_placeholder_text='MMM Do, YY'
                 ),
                 html.Label("Select Variable:"),
@@ -135,5 +114,6 @@ leaflet_map = html.Div(
                 "zIndex": 1000,  # Ensure controls are on top of the map
             },
         ),
+        dcc.Store(id='forecast-start-dates-store', data=None),
     ],
 )

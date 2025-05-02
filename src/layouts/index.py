@@ -1,5 +1,5 @@
 from components import footer, header, sidebar, map
-from dash import html, _dash_renderer
+from dash import dcc, html, _dash_renderer
 import dash_bootstrap_components as dbc
 import dash_mantine_components as dmc
 
@@ -15,6 +15,7 @@ layout = dmc.MantineProvider(
             "flexDirection": "column",  # Stack children vertically
         },
         children=[
+            dcc.Store(id="page-load-trigger", data=True),
             dbc.Row(dbc.Col(header.header_layout, width=12)),
             dbc.Row(
                 [
