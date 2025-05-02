@@ -1,13 +1,18 @@
 import logging
+import os
+from urllib.parse import urlparse, urlunparse
+
 import dash
 import dash_leaflet as dl
 import pandas as pd
 from config import CATALOG_PATH, DATA_URL, TITILER_URL
 from dash import ALL, MATCH, Input, Output, State, no_update
-from stac.process import get_all_forecast_start_dates, get_cog_path, get_collections, get_leadtime
-
-import os
-from urllib.parse import urlparse, urlunparse
+from stac.process import (
+    get_all_forecast_start_dates,
+    get_cog_path,
+    get_collections,
+    get_leadtime,
+)
 
 from .utils import convert_colormap_to_colorscale
 
@@ -61,14 +66,18 @@ def register_callbacks(app: dash.Dash):
     """
 
     @app.callback(
-        [Output("forecast-start-dates-store", "data"),
-        Output("forecast-init-date-picker", "min_date_allowed"),
-        Output("forecast-init-date-picker", "max_date_allowed"),
-        Output("forecast-init-date-picker", "initial_visible_month"),
-        Output("forecast-init-date-picker", "disabled_days")],
+        [
+            Output("forecast-start-dates-store", "data"),
+            Output("forecast-init-date-picker", "min_date_allowed"),
+            Output("forecast-init-date-picker", "max_date_allowed"),
+            Output("forecast-init-date-picker", "initial_visible_month"),
+            Output("forecast-init-date-picker", "disabled_days"),
+        ],
         [Input("page-load-trigger", "data")],
     )
-    def update_forecast_start_dates(_) -> list[list[str], str|None, str|None, str|None, pd.DatetimeIndex|None]:
+    def update_forecast_start_dates(
+        _,
+    ) -> list[list[str], str | None, str | None, str | None, pd.DatetimeIndex | None]:
         """
         This function retrieves and processes IceNet forecast start dates from the STAC Catalog.
         It returns a list containing sorted forecast start dates, min/max allowed dates,
@@ -82,15 +91,17 @@ def register_callbacks(app: dash.Dash):
                 - Initial visible month
                 - Disabled days for the date picker
         """
-        forecast_start_dates = sorted(get_all_forecast_start_dates(CATALOG_PATH, collection_id="north"))
+        forecast_start_dates = sorted(
+            get_all_forecast_start_dates(CATALOG_PATH, collection_id="north")
+        )
 
         if forecast_start_dates:
             # Define start and end dates for available IceNet forecasts
             logging.debug("Forecast start dates available:", forecast_start_dates)
             # Note to self: Dates should be in format 'YYYY-MM-DD'
-            min_date_allowed=forecast_start_dates[0]
-            max_date_allowed=forecast_start_dates[-1]
-            initial_visible_month=max_date_allowed
+            min_date_allowed = forecast_start_dates[0]
+            max_date_allowed = forecast_start_dates[-1]
+            initial_visible_month = max_date_allowed
 
             logging.debug("min_date_allowed", min_date_allowed)
             logging.debug("max_date_allowed", max_date_allowed)
@@ -98,21 +109,25 @@ def register_callbacks(app: dash.Dash):
             # Create list of days we don't have forecasts for, so, we can disable them in date picker.
             date_range = pd.date_range(min_date_allowed, max_date_allowed, freq="D")
             disabled_days = date_range[~date_range.isin(forecast_start_dates)]
-            logging.debug(f"Creating list of dates starting from {min_date_allowed} to {max_date_allowed}")
+            logging.debug(
+                f"Creating list of dates starting from {min_date_allowed} to {max_date_allowed}"
+            )
             logging.debug("Disabled days:", disabled_days)
         else:
             min_date_allowed = None
             max_date_allowed = None
             initial_visible_month = None
             disabled_days = None
-            logging.debug("No forecast dates loaded, issue connecting to/loading STAC Catalog?")
+            logging.debug(
+                "No forecast dates loaded, issue connecting to/loading STAC Catalog?"
+            )
 
         return [
             forecast_start_dates,
             min_date_allowed,
             max_date_allowed,
             initial_visible_month,
-            disabled_days
+            disabled_days,
         ]
 
     @app.callback(
@@ -145,25 +160,32 @@ def register_callbacks(app: dash.Dash):
             if not forecast_start_date:
                 return no_update  # No tiles to display
 
-            selected_item = get_cog_path(CATALOG_PATH, collection_id, forecast_start_date, leadtime)
+            selected_item = get_cog_path(
+                CATALOG_PATH, collection_id, forecast_start_date, leadtime
+            )
             if selected_item:
-                logging.debug("This is the selected_item:", selected_item, "in collection:", collection_id)
+                logging.debug(
+                    "This is the selected_item:",
+                    selected_item,
+                    "in collection:",
+                    collection_id,
+                )
 
                 # Get the tile URL from Titiler
-                tile_url = get_tile_url(selected_item) + f"&colormap_name={colormap}&rescale=0,1"
+                tile_url = (
+                    get_tile_url(selected_item)
+                    + f"&colormap_name={colormap}&rescale=0,1"
+                )
                 tile_url = normalise_url_path(tile_url)
                 logging.debug("tile_url:", tile_url)
 
                 collection_layer = dl.Overlay(
                     dl.TileLayer(
-                        id={
-                            'type': 'cog-collections',
-                            'index': i
-                        },
+                        id={"type": "cog-collections", "index": i},
                         url=tile_url,
                         zIndex=100,
                         opacity=1,
-                        ),
+                    ),
                     name=collection_id,
                     checked=True,
                 )
@@ -171,7 +193,6 @@ def register_callbacks(app: dash.Dash):
                 tile_layers.append(collection_layer)
 
         return tile_layers
-
 
     @app.callback(
         Output("cbar", "colorscale"),
@@ -186,8 +207,11 @@ def register_callbacks(app: dash.Dash):
         else:
             return colorscale
 
-
-    @app.callback(Output({'type': 'cog-collections', 'index': ALL}, 'opacity'), Input("opacity-slider", "value"), State({'type': 'cog-collections', 'index': ALL}, 'opacity'))
+    @app.callback(
+        Output({"type": "cog-collections", "index": ALL}, "opacity"),
+        Input("opacity-slider", "value"),
+        State({"type": "cog-collections", "index": ALL}, "opacity"),
+    )
     def update_cog_layer_opacity(opacity: float, current_opacity: list[float]):
         """Update the opacity of all COG collections layers.
 
@@ -203,4 +227,4 @@ def register_callbacks(app: dash.Dash):
         """
         logging.debug(f"Opacity changed to {opacity}")
 
-        return [opacity]*len(current_opacity)
+        return [opacity] * len(current_opacity)

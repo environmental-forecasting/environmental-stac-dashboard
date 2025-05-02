@@ -1,7 +1,7 @@
-from components import footer, header, sidebar, map
-from dash import dcc, html, _dash_renderer
 import dash_bootstrap_components as dbc
 import dash_mantine_components as dmc
+from components import footer, header, map, sidebar
+from dash import _dash_renderer, dcc, html
 
 _dash_renderer._set_react_version("18.2.0")
 

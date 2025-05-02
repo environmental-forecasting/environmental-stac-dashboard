@@ -1,7 +1,7 @@
 import datetime as dt
 import logging
-import numpy as np
 
+import numpy as np
 from pystac import Catalog
 
 
@@ -25,6 +25,7 @@ def get_catalog(catalog_path: str) -> Catalog:
     except:
         logging.error("Error loading STAC catalog")
         return set()
+
 
 def get_collections(catalog_path: str) -> list[str]:
     """
@@ -72,7 +73,10 @@ def get_all_forecast_start_dates(catalog_path: str, collection_id: str) -> set[s
 
     return forecast_start_dates
 
-def get_leadtimes(catalog_path: str, collection_id: str, forecast_start_date: str) -> list[int]:
+
+def get_leadtimes(
+    catalog_path: str, collection_id: str, forecast_start_date: str
+) -> list[int]:
     """
     Retrieve all leadtime items for a given hemisphere collection and forecast_start_time.
 
@@ -99,12 +103,15 @@ def get_leadtimes(catalog_path: str, collection_id: str, forecast_start_date: st
         # print(dir(forecast_collection.extent.temporal))
         # print(forecast_collection.extent.temporal.intervals)
         # forecast_start, forecast_end = forecast_collection.extent.temporal.intervals[0]
-        forecast_time_interval = np.concatenate(forecast_collection.extent.temporal.intervals)
-        forecast_start, forecast_end = [time.strftime('%Y-%m-%d') for time in forecast_time_interval]
+        forecast_time_interval = np.concatenate(
+            forecast_collection.extent.temporal.intervals
+        )
+        forecast_start, forecast_end = [
+            time.strftime("%Y-%m-%d") for time in forecast_time_interval
+        ]
         if forecast_start == forecast_start_date:
             # print("forecast_collection", forecast_collection.get_items())
             return forecast_collection.get_items()
-
 
     # # Extract leadtimes from the items in the forecast collection
     # leadtimes = []
@@ -118,7 +125,9 @@ def get_leadtimes(catalog_path: str, collection_id: str, forecast_start_date: st
     # return forecast_collection.get_items()
 
 
-def get_leadtime(catalog_path: str, collection_id: str, forecast_start_date: str, leadtime: int):
+def get_leadtime(
+    catalog_path: str, collection_id: str, forecast_start_date: str, leadtime: int
+):
     """
     Retrieve COG path of specified leadtime for a given hemisphere collection and forecast_start_time.
 
@@ -128,14 +137,18 @@ def get_leadtime(catalog_path: str, collection_id: str, forecast_start_date: str
         forecast_start_date: Forecast start time in "YYYY-MM-DD" format.
         leadtime: Forecast lead time.
     """
-    forecast_collection = get_leadtimes(catalog_path, collection_id, forecast_start_date)
+    forecast_collection = get_leadtimes(
+        catalog_path, collection_id, forecast_start_date
+    )
     if forecast_collection:
         for forecast in forecast_collection:
             if forecast.properties["leadtime"] == leadtime:
-                return forecast#.get_assets()#["geotiff"].href
+                return forecast  # .get_assets()#["geotiff"].href
 
 
-def get_cog_path(catalog_path: str, collection_id: str, forecast_start_date: str, leadtime: int):
+def get_cog_path(
+    catalog_path: str, collection_id: str, forecast_start_date: str, leadtime: int
+):
     """
     Retrieve COG path of specified leadtime for a given collection and forecast_start_time.
 
@@ -145,7 +158,9 @@ def get_cog_path(catalog_path: str, collection_id: str, forecast_start_date: str
         forecast_start_date: Forecast start time in "YYYY-MM-DD" format.
         leadtime: Forecast lead time.
     """
-    forecast_leadtime_collection = get_leadtimes(catalog_path, collection_id, forecast_start_date)
+    forecast_leadtime_collection = get_leadtimes(
+        catalog_path, collection_id, forecast_start_date
+    )
     if forecast_leadtime_collection:
         for forecast in forecast_leadtime_collection:
             if forecast.properties["leadtime"] == leadtime:
