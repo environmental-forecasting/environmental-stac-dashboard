@@ -74,6 +74,40 @@ def get_all_forecast_start_dates(catalog_path: str, collection_id: str) -> set[s
     return forecast_start_dates
 
 
+def get_all_forecast_dates(catalog_path: str, collection_id: str) -> set[str]:
+    """
+    Retrieve all available `forecast_start_date` and `forecast_end_date` values
+    for a given collection.
+
+    Args:
+        catalog_path: Path to the STAC catalog JSON file.
+        collection: Collection ID (e.g., "north" or "south").
+
+    Returns:
+        A set of unique forecast_start_date values in "YYYY-MM-DD" format.
+    """
+    catalog = get_catalog(catalog_path)
+
+    # Find the hemisphere collection
+    collection = next(
+        (coll for coll in catalog.get_children() if coll.id == collection_id), None
+    )
+    if not collection:
+        raise ValueError(f"collection '{collection_id}' not found in catalog.")
+
+    # Extract all forecast_start_date values from the items in the forecast collections
+    forecast_dates = {}
+    for forecast_collection in collection.get_children():
+        temporal_interval = forecast_collection.extent.temporal.intervals
+
+        forecast_start_date, forecast_end_date = temporal_interval[0]
+
+        if forecast_start_date and forecast_end_date:
+            forecast_dates[forecast_start_date.strftime("%Y-%m-%d")] = forecast_end_date.strftime("%Y-%m-%d")
+
+    return forecast_dates
+
+
 def get_leadtimes(
     catalog_path: str, collection_id: str, forecast_start_date: str
 ) -> list[int]:
@@ -100,9 +134,6 @@ def get_leadtimes(
 
     # Find the forecast collection for the given forecast_start_date
     for forecast_collection in collection.get_children():
-        # print(dir(forecast_collection.extent.temporal))
-        # print(forecast_collection.extent.temporal.intervals)
-        # forecast_start, forecast_end = forecast_collection.extent.temporal.intervals[0]
         forecast_time_interval = np.concatenate(
             forecast_collection.extent.temporal.intervals
         )
@@ -110,7 +141,6 @@ def get_leadtimes(
             time.strftime("%Y-%m-%d") for time in forecast_time_interval
         ]
         if forecast_start == forecast_start_date:
-            # print("forecast_collection", forecast_collection.get_items())
             return forecast_collection.get_items()
 
     # # Extract leadtimes from the items in the forecast collection

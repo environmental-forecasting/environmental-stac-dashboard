@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 from urllib.parse import urlparse, urlunparse
 
@@ -6,8 +7,10 @@ import dash
 import dash_leaflet as dl
 import pandas as pd
 from config import CATALOG_PATH, DATA_URL, TITILER_URL
+from datetime import datetime, timedelta
 from dash import ALL, MATCH, Input, Output, State, no_update
 from stac.process import (
+    get_all_forecast_dates,
     get_all_forecast_start_dates,
     get_cog_path,
     get_collections,
@@ -67,7 +70,7 @@ def register_callbacks(app: dash.Dash):
 
     @app.callback(
         [
-            Output("forecast-start-dates-store", "data"),
+            Output("forecast-dates-store", "data"),
             Output("forecast-init-date-picker", "min_date_allowed"),
             Output("forecast-init-date-picker", "max_date_allowed"),
             Output("forecast-init-date-picker", "initial_visible_month"),
@@ -91,13 +94,15 @@ def register_callbacks(app: dash.Dash):
                 - Initial visible month
                 - Disabled days for the date picker
         """
-        forecast_start_dates = sorted(
-            get_all_forecast_start_dates(CATALOG_PATH, collection_id="north")
-        )
+        forecast_dates = get_all_forecast_dates(CATALOG_PATH, collection_id="north")
 
-        if forecast_start_dates:
-            # Define start and end dates for available IceNet forecasts
+        if forecast_dates:
+            forecast_start_dates_str = forecast_dates.keys()
+            forecast_start_dates = [datetime.strptime(date_str, "%Y-%m-%d") for date_str in forecast_start_dates_str]
+
+            # Define start and end `forecast_init_dates` for available IceNet forecasts
             logging.debug("Forecast start dates available:", forecast_start_dates)
+
             # Note to self: Dates should be in format 'YYYY-MM-DD'
             min_date_allowed = forecast_start_dates[0]
             max_date_allowed = forecast_start_dates[-1]
@@ -123,12 +128,51 @@ def register_callbacks(app: dash.Dash):
             )
 
         return [
-            forecast_start_dates,
+            forecast_dates,
             min_date_allowed,
             max_date_allowed,
             initial_visible_month,
             disabled_days,
         ]
+
+
+    @app.callback(
+        Output("time-slider-div", "style"),
+        Output("custom-tooltip", "children"),
+        Output("leadtime-slider", "min"),
+        Output("leadtime-slider", "max"),
+        Output("leadtime-slider", "marks"),
+        Input("forecast-init-date-picker", "date"),
+        Input("leadtime-slider", "value"),
+        State("forecast-dates-store", "data"),
+        State("time-slider-div", "style"),
+        prevent_initial_call=True,
+    )
+    def update_leadtime_slider(selected_date, leadtime: int, forecast_dates: dict, slider_style):
+        forecast_start_date_str = selected_date
+        forecast_end_date_str = forecast_dates[selected_date]
+        forecast_start_date = datetime.strptime(forecast_start_date_str, "%Y-%m-%d")
+        forecast_end_date = datetime.strptime(forecast_end_date_str, "%Y-%m-%d")
+
+        num_days = (forecast_end_date - forecast_start_date).days
+        leadtime_min = 0
+        leadtime_max = num_days
+        leadtimes = list(range(num_days + 1))
+        marks = {
+            idx : (forecast_start_date + timedelta(days=idx)).strftime("%Y-%m-%d") for idx in leadtimes
+        }
+
+        # Calculate step to get at most 10 items
+        step = max(1, math.ceil(len(leadtimes) / 20))
+
+        marks_subset = {
+            idx: (forecast_start_date + timedelta(days=idx)).strftime("%Y-%m-%d")
+            for idx in leadtimes[::step]
+        }
+        current_leadtime = f"Selected Leadtime: {marks[leadtime]}"
+        slider_style["display"] = "inline-block"
+        return slider_style, current_leadtime, leadtime_min, leadtime_max, marks_subset
+
 
     @app.callback(
         Output("cog-results-layer", "children"),
@@ -156,7 +200,6 @@ def register_callbacks(app: dash.Dash):
             logging.debug("collections", collections)
             logging.debug(f"Colormap changed to {colormap}")
 
-            print(f"Selected item {forecast_start_date}")
             if not forecast_start_date:
                 return no_update  # No tiles to display
 

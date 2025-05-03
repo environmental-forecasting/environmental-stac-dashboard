@@ -39,7 +39,11 @@ leaflet_map = html.Div(
                     id="cbar",
                     width=30,
                     height=200,
-                    style={"opacity": "1.0"},
+                    style={"opacity": "1.0",
+                        "backgroundColor": "rgba(255, 255, 255, 0.8)",
+                        "padding": "10px",
+                        "border-radius": "10px",
+                        },
                     position="topleft",
                     tooltip=True,
                     colorscale=blues_r,
@@ -109,6 +113,6 @@ leaflet_map = html.Div(
                 "zIndex": 1000,  # Ensure controls are on top of the map
             },
         ),
-        dcc.Store(id="forecast-start-dates-store", data=None),
+        dcc.Store(id="forecast-dates-store", data=None),
     ],
 )

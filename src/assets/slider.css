@@ -1,25 +1,29 @@
 #leadtime-slider .rc-slider-mark-text {
-    color: white;
+    color: black;
     pointer-events: none;  /* Prevent clicks on marks */
     cursor: default;       /* Change cursor to indicate no interaction */   
+    transform: rotate(-45deg) !important;
+    transform-origin: top left !important;
+    bottom: 5px;
+    white-space: nowrap;
 }
 
 /* Increase the height of the entire slider track */
 #leadtime-slider .rc-slider {
-    height: 25px;
+    height: 15px;
 }
 
 #leadtime-slider .rc-slider-track {
     background-color: indigo;
     color: white;
     /* background-color: #4CAF50; */
-    height: 25px;
+    height: 15px;
 }
 
 /* Make the unselected part of the track thicker */
 #leadtime-slider .rc-slider-rail {
-    background-color: black;
-    height: 25px;
+    background-color: gray;
+    height: 15px;
 }
 
 #leadtime-slider .rc-slider-dot{
@@ -31,7 +35,7 @@
 
 /* Custom arrow handle for the slider */
 #leadtime-slider .rc-slider-handle {
-    margin-top: 25px;
+    margin-top: 15px;
     width: 10px;
     height: 10;
     border-left: 20px solid transparent;

@@ -31,12 +31,23 @@ layout = dmc.MantineProvider(
                                         [
                                             dcc.Slider(
                                                 id="leadtime-slider",
-                                                min=0,
-                                                max=92,
+                                                min=0, # Stub
+                                                max=1, # Stub
                                                 step=1,
                                                 value=0,
-                                                marks={i: f"{i}" for i in range(0, 93, 5)},
-                                                tooltip={"placement": "bottom", "always_visible": True},
+                                                # marks={i: f"{i}" for i in range(0, 93, 5)},
+                                                # tooltip={"placement": "bottom", "always_visible": False},
+                                                updatemode="drag",
+                                            ),
+                                            html.Div(
+                                                id="custom-tooltip",
+                                                style={
+                                                    "textAlign": "center",
+                                                    "marginTop": "5px",
+                                                    "color": "black",
+                                                    "fontWeight": "bold",
+                                                    "fontSize": "16px",
+                                                },
                                             ),
                                             html.Div(
                                                 id="selected-time",
@@ -49,16 +60,17 @@ layout = dmc.MantineProvider(
                                         ],
                                         style={
                                             "position": "absolute",
-                                            "display": "block",
+                                            "display": "none",
                                             "bottom": "15px",
                                             "left": "50%",
                                             "transform": "translateX(-50%)",
                                             "width": "90%",
                                             "backgroundColor": "rgba(255, 255, 255, 0.8)",
-                                            "padding": "15px",
+                                            "padding": "60px 15px 0px",
                                             "borderRadius": "10px",
                                             "zIndex": 9999,
                                         },
+                                        id="time-slider-div",
                                     ),
                                 ],
                                 style={
