@@ -21,13 +21,53 @@ layout = dmc.MantineProvider(
                 [
                     # dbc.Col(sidebar.sidebar_layout, width=0),
                     dbc.Col(
-                        html.Div(
-                            map.leaflet_map,
-                            style={
-                                "height": "100%",  # Let the map fill the parent container
-                                "flex": "1",  # Make sure the map takes available space in the column
-                            },
-                        ),
+                        [
+                            html.Div(
+                                [
+                                    # Main map
+                                    map.leaflet_map,
+                                    # Floating time slider overlay
+                                    html.Div(
+                                        [
+                                            dcc.Slider(
+                                                id="leadtime-slider",
+                                                min=0,
+                                                max=92,
+                                                step=1,
+                                                value=0,
+                                                marks={i: f"{i}" for i in range(0, 93, 5)},
+                                                tooltip={"placement": "bottom", "always_visible": True},
+                                            ),
+                                            html.Div(
+                                                id="selected-time",
+                                                style={
+                                                    "textAlign": "center",
+                                                    "marginTop": "10px",
+                                                    "color": "white",
+                                                },
+                                            ),
+                                        ],
+                                        style={
+                                            "position": "absolute",
+                                            "display": "block",
+                                            "bottom": "10px",
+                                            "left": "50%",
+                                            "transform": "translateX(-50%)",
+                                            "width": "90%",
+                                            "backgroundColor": "rgba(0, 0, 0, 0.4)",
+                                            "padding": "15px",
+                                            "borderRadius": "10px",
+                                            "zIndex": 9999,
+                                        },
+                                    ),
+                                ],
+                                style={
+                                    "position": "relative",
+                                    "height": "100%",  # Let the map fill the parent container
+                                    "flex": "1",  # Make sure the map takes available space in the column
+                                },
+                            ),
+                        ],
                         width=12,
                     ),
                 ],
@@ -38,6 +78,7 @@ layout = dmc.MantineProvider(
                     "flexDirection": "row",  # Stack children horizontally
                 },
             ),
+
             dbc.Row(dbc.Col(footer.footer_layout, width=12)),
         ],
     )
