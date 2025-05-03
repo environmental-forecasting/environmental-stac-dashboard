@@ -18,7 +18,7 @@
 
 /* Make the unselected part of the track thicker */
 #leadtime-slider .rc-slider-rail {
-    background-color: #ddd;
+    background-color: black;
     height: 25px;
 }
 

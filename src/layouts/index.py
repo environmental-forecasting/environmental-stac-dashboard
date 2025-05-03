@@ -50,11 +50,11 @@ layout = dmc.MantineProvider(
                                         style={
                                             "position": "absolute",
                                             "display": "block",
-                                            "bottom": "10px",
+                                            "bottom": "15px",
                                             "left": "50%",
                                             "transform": "translateX(-50%)",
                                             "width": "90%",
-                                            "backgroundColor": "rgba(0, 0, 0, 0.4)",
+                                            "backgroundColor": "rgba(255, 255, 255, 0.8)",
                                             "padding": "15px",
                                             "borderRadius": "10px",
                                             "zIndex": 9999,
