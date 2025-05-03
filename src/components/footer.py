@@ -12,15 +12,6 @@ footer_layout = html.Footer(
                     className="bsk-container",
                     children=[
                         html.Div(
-                            html.A(
-                                "Is something wrong with this page?",
-                                href="/feedback",
-                                target="_blank",
-                            ),
-                            className="bsk-footer-is-something-wrong d-inline",
-                        ),
-                        html.Div(className="bsk-footer-divider"),
-                        html.Div(
                             className="bsk-footer-governance",
                             style={"display": "inline-block"},
                             children=[
