@@ -1,8 +1,8 @@
 # icenet-dashboard
 
-This repository contains a dashboard for visualising IceNet forecasts. It is built on top of [Plotly Dash](https://dash.plotly.com/) to serve Cloud Optimized GeoTIFF (COG) files from [icenet-geotiff-generator](https://github.com/icenet-ai/icenet-geotiff-generator) using [icenet_titiler](https://github.com/icenet-ai/icenet-tiler-api).
+This repository contains a dashboard for visualising IceNet forecasts. It is built on top of [Plotly Dash](https://dash.plotly.com/) to serve Cloud Optimized GeoTIFF (COG) files from [icenet-dashboard-preprocessor](https://github.com/icenet-ai/icenet-dashboard-preprocessor) using [icenet-tiler-api](https://github.com/icenet-ai/icenet-tiler-api).
 
-Depends on `icenet-tiler-api` and `icenet-geotiff-generator`.
+Depends on `icenet-tiler-api` and `icenet-dashboard-preprocessor`.
 
 ## Usage
 
