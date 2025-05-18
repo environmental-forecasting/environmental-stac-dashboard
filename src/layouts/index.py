@@ -2,8 +2,11 @@ import dash_bootstrap_components as dbc
 import dash_mantine_components as dmc
 from components import footer, header, map, sidebar
 from dash import _dash_renderer, dcc, html
+from dash_extensions import EventListener
+from dash_iconify import DashIconify
 
 _dash_renderer._set_react_version("18.2.0")
+event = {"event": "click", "props": ["srcElement.className", "srcElement.innerText"]}
 
 layout = dmc.MantineProvider(
     dbc.Container(
@@ -15,6 +18,9 @@ layout = dmc.MantineProvider(
             "flexDirection": "column",  # Stack children vertically
         },
         children=[
+            dcc.Store(id="window-width"),
+            dcc.Interval(id="interval", interval=10000, n_intervals=0), # Check if width needs updating every 10s.
+            html.Div(id="output"),
             dcc.Store(id="page-load-trigger", data=True),
             dbc.Row(dbc.Col(header.header_layout, width=12)),
             dbc.Row(
@@ -27,50 +33,51 @@ layout = dmc.MantineProvider(
                                     # Main map
                                     map.leaflet_map,
                                     # Floating time slider overlay
-                                    html.Div(
-                                        [
-                                            dcc.Slider(
-                                                id="leadtime-slider",
-                                                min=0, # Stub
-                                                max=1, # Stub
-                                                step=1,
-                                                value=0,
-                                                # marks={i: f"{i}" for i in range(0, 93, 5)},
-                                                # tooltip={"placement": "bottom", "always_visible": False},
-                                                updatemode="drag",
-                                            ),
-                                            html.Div(
-                                                id="custom-tooltip",
-                                                style={
-                                                    "textAlign": "center",
-                                                    "marginTop": "5px",
-                                                    "color": "black",
-                                                    "fontWeight": "bold",
-                                                    "fontSize": "16px",
-                                                },
-                                            ),
-                                            html.Div(
-                                                id="selected-time",
-                                                style={
-                                                    "textAlign": "center",
-                                                    "marginTop": "10px",
-                                                    "color": "white",
-                                                },
-                                            ),
-                                        ],
+                                    dmc.Paper(
+                                        shadow="md",
+                                        radius="md",
+                                        withBorder=True,
+                                        p="md",
                                         style={
                                             "position": "absolute",
-                                            "display": "none",
                                             "bottom": "15px",
                                             "left": "50%",
                                             "transform": "translateX(-50%)",
                                             "width": "90%",
-                                            "backgroundColor": "rgba(255, 255, 255, 0.8)",
-                                            "padding": "60px 15px 0px",
-                                            "borderRadius": "10px",
                                             "zIndex": 9999,
+                                            "display": "none",  # Shown via callback
+                                            "backgroundColor": "rgba(255, 255, 255, 0.9)",
                                         },
                                         id="time-slider-div",
+                                        children=[
+                                            dmc.Slider(
+                                                id="leadtime-slider",
+                                                min=0, # Stub
+                                                max=0, # Stub
+                                                step=1,
+                                                value=0,
+                                                # marks=[
+                                                #     {"value": i, "label": f"{i}h"}
+                                                #     for i in range(0, 24, 3)
+                                                # ],
+                                                # thumbChildren=DashIconify(icon="hugeicons:circle-arrow-down-double", width=25),
+                                                thumbChildren=DashIconify(icon="ic:round-keyboard-double-arrow-down", width=25),
+                                                thumbSize=25,
+                                                styles={"thumb": {"borderWidth": 0, "padding": 0, "margin": 0}},
+                                                size="lg",
+                                                color="black",
+                                                showLabelOnHover=True,
+                                                labelAlwaysOn=False,
+                                            ),
+                                            dmc.Text(
+                                                id="selected-time",
+                                                ta="center",
+                                                variant="gradient",
+                                                gradient={"from": "red", "to": "yellow", "deg": 45},
+                                                size="lg",
+                                                mt="xl",
+                                            ),
+                                        ],
                                     ),
                                 ],
                                 style={

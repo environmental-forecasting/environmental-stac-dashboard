@@ -68,6 +68,17 @@ def register_callbacks(app: dash.Dash):
         The Dash app instance.
     """
 
+    # Get window width
+    app.clientside_callback(
+        """
+        function(n) {
+            return top.innerWidth;
+        }
+        """,
+        Output("window-width", "data"),
+        Input("interval", "n_intervals")
+    )
+
     @app.callback(
         [
             Output("forecast-dates-store", "data"),
@@ -135,20 +146,23 @@ def register_callbacks(app: dash.Dash):
             disabled_days,
         ]
 
-
     @app.callback(
         Output("time-slider-div", "style"),
-        Output("custom-tooltip", "children"),
+        Output("selected-time", "children"),
         Output("leadtime-slider", "min"),
         Output("leadtime-slider", "max"),
         Output("leadtime-slider", "marks"),
+        Input("window-width", "data"),
         Input("forecast-init-date-picker", "date"),
         Input("leadtime-slider", "value"),
         State("forecast-dates-store", "data"),
         State("time-slider-div", "style"),
         prevent_initial_call=True,
     )
-    def update_leadtime_slider(selected_date, leadtime: int, forecast_dates: dict, slider_style):
+    def update_leadtime_slider(window_width: str, selected_date, leadtime: int, forecast_dates: dict, slider_style):
+        if not selected_date or selected_date not in forecast_dates:
+            return no_update
+
         forecast_start_date_str = selected_date
         forecast_end_date_str = forecast_dates[selected_date]
         forecast_start_date = datetime.strptime(forecast_start_date_str, "%Y-%m-%d")
@@ -162,16 +176,23 @@ def register_callbacks(app: dash.Dash):
             idx : (forecast_start_date + timedelta(days=idx)).strftime("%Y-%m-%d") for idx in leadtimes
         }
 
-        # Calculate step to get at most 10 items
-        step = max(1, math.ceil(len(leadtimes) / 20))
+        # Dynamically calculate step size based on window width
+        desired_marks = max(2, window_width // 100)
+        step = max(1, math.ceil(len(leadtimes) / desired_marks))
 
-        marks_subset = {
-            idx: (forecast_start_date + timedelta(days=idx)).strftime("%Y-%m-%d")
+        marks = [
+            {
+                "value": idx,
+                "label": (forecast_start_date + timedelta(days=idx)).strftime("%d %b %y"),
+            }
             for idx in leadtimes[::step]
-        }
-        current_leadtime = f"Selected Leadtime: {marks[leadtime]}"
+        ]
+
+        current_label = (forecast_start_date + timedelta(days=leadtime)).strftime("%Y-%m-%d")
+        current_leadtime = f"Selected Leadtime: {current_label}"
+
         slider_style["display"] = "inline-block"
-        return slider_style, current_leadtime, leadtime_min, leadtime_max, marks_subset
+        return slider_style, current_leadtime, leadtime_min, leadtime_max, marks
 
 
     @app.callback(

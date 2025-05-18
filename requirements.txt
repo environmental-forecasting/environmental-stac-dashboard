@@ -1,6 +1,7 @@
 dash
 dash_bootstrap_components
 dash-core-components
+dash-extensions
 dash-html-components
 dash_iconify
 dash-leaflet
