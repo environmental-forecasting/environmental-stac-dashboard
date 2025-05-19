@@ -110,6 +110,7 @@ def register_callbacks(app: dash.Dash):
         if forecast_dates:
             forecast_start_dates_str = forecast_dates.keys()
             forecast_start_dates = [datetime.strptime(date_str, "%Y-%m-%d") for date_str in forecast_start_dates_str]
+            forecast_start_dates = sorted(forecast_start_dates)
 
             # Define start and end `forecast_init_dates` for available IceNet forecasts
             logging.debug("Forecast start dates available:", forecast_start_dates)
