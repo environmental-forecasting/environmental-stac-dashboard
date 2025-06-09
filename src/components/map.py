@@ -1,4 +1,5 @@
 import dash_leaflet as dl
+import dash_mantine_components as dmc
 from dash import dcc, html
 from rio_tiler.colormap import ColorMaps
 
@@ -62,15 +63,10 @@ leaflet_map = html.Div(
         html.Div(
             [
                 html.Label("Select Forecast Start:"),
-                # dmc.DatePickerInput(w=200, numberOfColumns=1),
-                dcc.DatePickerSingle(
+                dmc.DatePickerInput(
                     id="forecast-init-date-picker",
-                    # min_date_allowed=min_date_allowed,
-                    # max_date_allowed=max_date_allowed,
-                    # initial_visible_month=initial_visible_month,
-                    display_format="YYYY-MM-DD",
-                    # disabled_days=disabled_days,
-                    # start_date_placeholder_text='MMM Do, YY'
+                    value=None,
+                    popoverProps={"zIndex": 10000},
                 ),
                 html.Label("Select Variable:"),
                 dcc.Dropdown(

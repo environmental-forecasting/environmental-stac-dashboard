@@ -82,10 +82,10 @@ def register_callbacks(app: dash.Dash):
     @app.callback(
         [
             Output("forecast-dates-store", "data"),
-            Output("forecast-init-date-picker", "min_date_allowed"),
-            Output("forecast-init-date-picker", "max_date_allowed"),
-            Output("forecast-init-date-picker", "initial_visible_month"),
-            Output("forecast-init-date-picker", "disabled_days"),
+            Output("forecast-init-date-picker", "minDate"),
+            Output("forecast-init-date-picker", "maxDate"),
+            Output("forecast-init-date-picker", "defaultDate"),
+            Output("forecast-init-date-picker", "disabledDates"),
         ],
         [Input("page-load-trigger", "data")],
     )
@@ -125,7 +125,8 @@ def register_callbacks(app: dash.Dash):
 
             # Create list of days we don't have forecasts for, so, we can disable them in date picker.
             date_range = pd.date_range(min_date_allowed, max_date_allowed, freq="D")
-            disabled_days = date_range[~date_range.isin(forecast_start_dates)]
+            forecast_start_date_set = set(d.date() for d in forecast_start_dates)
+            disabled_days = [d.date() for d in date_range if d.date() not in forecast_start_date_set]
             logging.debug(
                 f"Creating list of dates starting from {min_date_allowed} to {max_date_allowed}"
             )
@@ -154,7 +155,7 @@ def register_callbacks(app: dash.Dash):
         Output("leadtime-slider", "max"),
         Output("leadtime-slider", "marks"),
         Input("window-width", "data"),
-        Input("forecast-init-date-picker", "date"),
+        Input("forecast-init-date-picker", "value"),
         Input("leadtime-slider", "value"),
         State("forecast-dates-store", "data"),
         State("time-slider-div", "style"),
@@ -199,7 +200,7 @@ def register_callbacks(app: dash.Dash):
     @app.callback(
         Output("cog-results-layer", "children"),
         Input("colormap-dropdown", "value"),
-        Input("forecast-init-date-picker", "date"),
+        Input("forecast-init-date-picker", "value"),
         Input("leadtime-slider", "value"),
         prevent_initial_call=True,
     )
