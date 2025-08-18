@@ -1,5 +1,10 @@
+import math
 import requests
 from rio_tiler.colormap import ColorMaps
+
+
+def round_2dp(value):
+    return math.floor(value * 100) / 100
 
 
 def convert_colormap_to_colorscale(cmap: str):

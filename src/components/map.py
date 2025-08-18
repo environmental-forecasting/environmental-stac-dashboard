@@ -86,6 +86,57 @@ leaflet_map = html.Div(
                     value=DEFAULT_COLORMAP,
                     clearable=False,
                 ),
+                html.Label("Colorbar Control:"),
+                html.Div([
+                    html.Div([
+                        dcc.Input(
+                            id="fixed-min",
+                            type="number",
+                            placeholder="min",
+                            debounce=True,
+                            style={
+                                "width": "100px",
+                                "borderRadius": "5px",
+                                "padding": "5px",
+                                "border": "1px solid #ccc",
+                            },
+                        ),
+                        dcc.Input(
+                            id="fixed-max",
+                            type="number",
+                            placeholder="max",
+                            debounce=True,
+                            style={
+                                "width": "100px",
+                                "borderRadius": "5px",
+                                "padding": "5px",
+                                "border": "1px solid #ccc",
+                            },
+                        ),
+                    ], style={
+                        "display": "flex",
+                        "gap": "10px",
+                        "marginBottom": "10px",
+                        "justifyContent": "space-between"
+                    }),
+                    html.Button(
+                        "Fix colorbar range",
+                        id="fix-colorbar-button",
+                        n_clicks=0,
+                        style={
+                            "backgroundColor": "#f0f0f0",  # Colour for default (disabled) state
+                            "border": "1px solid #ccc",
+                            "padding": "8px 12px",
+                            "borderRadius": "5px",
+                            "cursor": "pointer",
+                            "width": "100%",
+                            "fontWeight": "500",
+                            "fontSize": "14px",
+                            "color": "#333",
+                        },
+                    ),
+                ], style={}),
+
                 html.Label("Opacity Control:"),
                 dcc.Slider(
                     id="opacity-slider",
@@ -112,6 +163,6 @@ leaflet_map = html.Div(
             },
         ),
         dcc.Store(id="forecast-dates-store", data=None),
-        dcc.Store(id="band-min-max", data=None),
+        dcc.Store(id="fix-colorbar-range", data=None),
     ],
 )

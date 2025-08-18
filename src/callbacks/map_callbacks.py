@@ -14,7 +14,7 @@ from stac.process import (
     STAC,
 )
 
-from .utils import convert_colormap_to_colorscale, get_cog_band_statistics
+from .utils import convert_colormap_to_colorscale, get_cog_band_statistics, round_2dp
 
 
 def normalise_url_path(url: str) -> str:
@@ -97,7 +97,7 @@ def register_callbacks(app: dash.Dash):
         _,
     ) -> list[list[str], str | None, str | None, str | None, pd.DatetimeIndex | None]:
         """
-        This function retrieves and processes IceNet forecast start dates from the STAC Catalog.
+        This function retrieves and processes forecast start dates from the STAC Catalog.
         It returns a list containing sorted forecast start dates, min/max allowed dates,
         initial visible month, and disabled days for the date picker.
 
@@ -259,14 +259,26 @@ def register_callbacks(app: dash.Dash):
 
     @app.callback(
         Output("cog-results-layer", "children"),
-        Output("band-min-max", "data"),
+        Output("fixed-min", "value"),
+        Output("fixed-max", "value"),
         Input("colormap-dropdown", "value"),
         Input("forecast-init-date-picker", "value"),
         Input("variable-dropdown", "value"),
+        Input("fix-colorbar-range", "data"),
+        Input("fixed-min", "value"),
+        Input("fixed-max", "value"),
         Input("leadtime-slider", "value"),
         prevent_initial_call=True,
     )
-    def update_cog_layer(colormap: str, forecast_start_date: str, band_index: int, leadtime: int = 0):
+    def update_cog_layer(
+        colormap: str,
+        forecast_start_date: str,
+        band_index: int,
+        fix_range,
+        fixed_min,
+        fixed_max,
+        leadtime: int = 0,
+    ):
         """
         Updates the COG layers on the map based on selected colormap, date, and leadtime.
 
@@ -281,7 +293,7 @@ def register_callbacks(app: dash.Dash):
         """
 
         if not forecast_start_date:
-            return no_update
+            return no_update, no_update, no_update
 
         # Convert to ISO 8601 format expected
         forecast_reference_time_str = datetime.strptime(forecast_start_date, "%Y-%m-%d").isoformat() + "Z"
@@ -294,15 +306,21 @@ def register_callbacks(app: dash.Dash):
 
         if leadtime >= len(cog_assets):
             logging.warning(f"Leadtime {leadtime} out of range for {collection_id}")
-            return no_update
+            return no_update, no_update, no_update
 
         cog_asset = cog_assets[leadtime]
         cog_href = cog_asset.href
 
-        # Get min/max to rescale the 0-255 image to data range
-        band_stats = get_cog_band_statistics(TITILER_URL, cog_url=cog_href, band_index=band_index)
-        min_val = band_stats.get("min", 0)
-        max_val = band_stats.get("max", 1)
+        # Determine rescale range
+        if "fixed" in (fix_range or []):
+            min_val = fixed_min if fixed_min is not None else 0
+            max_val = fixed_max if fixed_max is not None else 1
+        else:
+            # Get min/max to rescale the 0-255 image to data range
+            band_stats = get_cog_band_statistics(TITILER_URL, cog_url=cog_href, band_index=band_index)
+            min_val = band_stats.get("min", 0)
+            max_val = band_stats.get("max", 1)
+        min_val, max_val = round_2dp(min_val), round_2dp(max_val)
 
         tile_url = get_tile_url(cog_href) + f"&colormap_name={colormap}&rescale={min_val},{max_val}&bidx={band_index}"
 
@@ -320,7 +338,8 @@ def register_callbacks(app: dash.Dash):
         )
         tile_layers.append(layer)
 
-        return tile_layers, {"min": min_val, "max": max_val}
+        return tile_layers, min_val, max_val
+
 
     @app.callback(
         Output("cbar", "colorscale"),
@@ -328,18 +347,66 @@ def register_callbacks(app: dash.Dash):
         Output("cbar", "max"),
         Input("cbar", "colorscale"),
         Input("colormap-dropdown", "value"),
-        Input("band-min-max", "data"),
+        Input("fixed-min", "value"),
+        Input("fixed-max", "value"),
         prevent_initial_call=True,
     )
-    def show_cbar(colorscale, colormap, band_min_max: dict):
+    def show_cbar(colorscale, colormap, min_val, max_val):
         colorscale = convert_colormap_to_colorscale(colormap) if colormap else colorscale
-        if band_min_max:
-            min_val = band_min_max["min"]
-            max_val = band_min_max["max"]
-        else:
+        if not (isinstance(min_val, (int, float)) and isinstance(max_val, (int, float))):
             min_val, max_val = 0, 1
-
         return colorscale, min_val, max_val
+
+
+    @app.callback(
+        Output("fix-colorbar-button", "style"),
+        Output("fix-colorbar-range", "data"),
+        Output("fixed-min", "disabled"),
+        Output("fixed-max", "disabled"),
+        Input("fix-colorbar-button", "n_clicks"),
+        prevent_initial_call=False,
+    )
+    def toggle_fix_colorbar_button(n_clicks: int):
+        """
+        Toggles 'fix colorbar' button state.
+
+        When button is clicked, this function alternates between two states:
+        - Fixed mode: Updates button style to active, sets colourbar range to manual min/max range.
+        - Unfixed mode: Reverts button styling, clears colorbar range data, and enables automatic min/max from dataset.
+
+        Args:
+            n_clicks: No. of times 'fix-colorbar-button' has been clicked.
+                Used to determine whether the state is fixed or unfixed.
+
+        Returns:
+            dict: CSS style for the 'fix-colorbar-button', with themed background/foreground colors based on state.
+            list: Colorbar range data, set to ['fixed'] when in fixed mode, and empty list otherwise.
+            bool: Disabled state for the 'fixed-min' input (True if not fixed, False if fixed).
+            bool: Disabled state for the 'fixed-max' input (same as 'fixed-min').
+
+        Notes:
+            - The callback is triggered on every click due to `prevent_initial_call=False`.
+            - When not fixed, users can manually adjust min/max values; when fixed, adjustments are disabled.
+            - Button styling alternates between a primary theme color and gray for visual feedback.
+        """
+        is_fixed = n_clicks % 2 == 1
+        # Colour for enabled state
+        theme_colour = "#3B71CA"
+        style = {
+            "backgroundColor": theme_colour if is_fixed else "#f0f0f0",
+            "border": "none",
+            "padding": "10px",
+            "borderRadius": "5px",
+            "cursor": "pointer",
+            "width": "100%",
+            "marginBottom": "10px",
+            "fontWeight": "bold",
+            "color": "white" if is_fixed else "#333",
+        }
+        disabled_inputs = False if is_fixed else True
+
+        return style, (["fixed"] if is_fixed else []), disabled_inputs, disabled_inputs
+
 
     @app.callback(
         Output({"type": "cog-collections", "index": ALL}, "opacity"),
