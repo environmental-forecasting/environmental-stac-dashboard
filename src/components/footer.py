@@ -1,5 +1,4 @@
 import datetime as dt
-
 from dash import html
 
 footer_layout = html.Footer(
@@ -10,10 +9,20 @@ footer_layout = html.Footer(
             children=[
                 html.Div(
                     className="bsk-container",
+                    style={
+                        "display": "flex",
+                        "flexWrap": "wrap",
+                        "justifyContent": "space-between",
+                        "alignItems": "center",
+                        "padding": "1rem",
+                    },
                     children=[
                         html.Div(
                             className="bsk-footer-governance",
-                            style={"display": "inline-block"},
+                            style={
+                                "flex": "1 1 300px",  # grow/shrink, basis width
+                                "minWidth": "200px",
+                            },
                             children=[
                                 "The ",
                                 html.A(
@@ -58,40 +67,35 @@ footer_layout = html.Footer(
                         html.Div(
                             className="bsk-footer-policy-links",
                             style={
-                                "float": "right",
-                                "clear": "right",
-                                "display": "inline-block",
+                                "flex": "0 1 300px",
+                                "minWidth": "200px",
+                                "textAlign": "right",
+                                "marginTop": "0.5rem",
                             },
                             children=[
                                 html.Ul(
                                     className="bsk-list-inline",
+                                    style={
+                                        "listStyleType": "none",
+                                        "padding": 0,
+                                        "margin": 0,
+                                        "display": "flex",
+                                        "justifyContent": "flex-end",
+                                        "gap": "1rem",
+                                    },
                                     children=[
-                                        html.Li(
-                                            [
-                                                html.A(
-                                                    "Cookies",
-                                                    href="/cookies",
-                                                )
-                                            ],
-                                            className="d-inline-block me-2",
-                                        ),
-                                        html.Li(
-                                            [html.A("Copyright", href="/copyright")],
-                                            className="d-inline-block me-2",
-                                        ),
-                                        html.Li(
-                                            [html.A("Privacy", href="/privacy")],
-                                            className="d-inline-block",
-                                        ),
+                                        html.Li(html.A("Cookies", href="/cookies")),
+                                        html.Li(html.A("Copyright", href="/copyright")),
+                                        html.Li(html.A("Privacy", href="/privacy")),
                                     ],
                                 ),
-                                f"{dt.date.today().year} British Antarctic Survey",
+                                html.Div(f"{dt.date.today().year} British Antarctic Survey", style={"marginTop": "0.5rem"}),
                             ],
                         ),
                     ],
                 ),
             ],
-            style={"padding-bottom": "2rem"},
+            style={"paddingBottom": "2rem"},
         )
     ],
 )
