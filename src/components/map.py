@@ -112,5 +112,6 @@ leaflet_map = html.Div(
             },
         ),
         dcc.Store(id="forecast-dates-store", data=None),
+        dcc.Store(id="band-min-max", data=None),
     ],
 )

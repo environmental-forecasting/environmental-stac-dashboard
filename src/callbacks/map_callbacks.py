@@ -14,7 +14,7 @@ from stac.process import (
     STAC,
 )
 
-from .utils import convert_colormap_to_colorscale
+from .utils import convert_colormap_to_colorscale, get_cog_band_statistics
 
 
 def normalise_url_path(url: str) -> str:
@@ -259,6 +259,7 @@ def register_callbacks(app: dash.Dash):
 
     @app.callback(
         Output("cog-results-layer", "children"),
+        Output("band-min-max", "data"),
         Input("colormap-dropdown", "value"),
         Input("forecast-init-date-picker", "value"),
         Input("variable-dropdown", "value"),
@@ -297,9 +298,15 @@ def register_callbacks(app: dash.Dash):
 
         cog_asset = cog_assets[leadtime]
         cog_href = cog_asset.href
-        tile_url = get_tile_url(cog_href) + f"&colormap_name={colormap}&rescale=0,1&bidx={band_index}"
 
-        logging.info("tile_url:", tile_url)
+        # Get min/max to rescale the 0-255 image to data range
+        band_stats = get_cog_band_statistics(TITILER_URL, cog_url=cog_href, band_index=band_index)
+        min_val = band_stats.get("min", 0)
+        max_val = band_stats.get("max", 1)
+
+        tile_url = get_tile_url(cog_href) + f"&colormap_name={colormap}&rescale={min_val},{max_val}&bidx={band_index}"
+
+        print("tile_url:", tile_url)
 
         layer = dl.Overlay(
             dl.TileLayer(
@@ -313,20 +320,26 @@ def register_callbacks(app: dash.Dash):
         )
         tile_layers.append(layer)
 
-        return tile_layers
+        return tile_layers, {"min": min_val, "max": max_val}
 
     @app.callback(
         Output("cbar", "colorscale"),
+        Output("cbar", "min"),
+        Output("cbar", "max"),
         Input("cbar", "colorscale"),
         Input("colormap-dropdown", "value"),
+        Input("band-min-max", "data"),
         prevent_initial_call=True,
     )
-    def show_cbar(colorscale, colormap):
-        if colormap:
-            colorscale = convert_colormap_to_colorscale(colormap)
-            return colorscale
+    def show_cbar(colorscale, colormap, band_min_max: dict):
+        colorscale = convert_colormap_to_colorscale(colormap) if colormap else colorscale
+        if band_min_max:
+            min_val = band_min_max["min"]
+            max_val = band_min_max["max"]
         else:
-            return colorscale
+            min_val, max_val = 0, 1
+
+        return colorscale, min_val, max_val
 
     @app.callback(
         Output({"type": "cog-collections", "index": ALL}, "opacity"),
