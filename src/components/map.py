@@ -63,10 +63,19 @@ leaflet_map = html.Div(
         # Controls for map manipulation
         html.Div(
             [
+                html.Label("Select Collection:"),
+                dcc.Dropdown(
+                    id="collections-dropdown",
+                    options=[],
+                    multi=True,
+                    placeholder="Select one or more collections",
+                ),
                 html.Label("Select Forecast Start:"),
                 dmc.DatePickerInput(
                     id="forecast-init-date-picker",
                     value=None,
+                    clearable=True,
+                    placeholder="Select",
                     popoverProps={"zIndex": 10000},
                 ),
                 html.Label("Select Variable:"),
