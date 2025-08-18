@@ -178,10 +178,18 @@ def register_callbacks(app: dash.Dash):
         # forecast_start_date = datetime.strptime(selected_date, "%Y-%m-%d")
         # Convert to ISO 8601 format which is what the "forecast:reference_time" property is stored as
         forecast_reference_time_str = datetime.strptime(selected_date, "%Y-%m-%d").isoformat() + "Z"
-        available_vars = stac.get_asset_band_names(
+        available_vars: dict[int] = stac.get_asset_bands(
             collection_id, forecast_reference_time_str, forecast_reference_time_str
         )
-        return available_vars if available_vars else None
+        # return available_vars.keys() if available_vars else None
+
+        if not available_vars:
+            return None
+
+        return [{"label": var_name, "value": band_index} for var_name, band_index in available_vars.items()]
+
+        # Assuming available_vars is a list of dicts like: [{'label': 'Temperature', 'band_index': 1}, ...]
+        # return [{"label": var["label"], "value": var["band_index"]} for var in available_vars]
 
 
     @app.callback(
@@ -257,7 +265,7 @@ def register_callbacks(app: dash.Dash):
         Input("leadtime-slider", "value"),
         prevent_initial_call=True,
     )
-    def update_cog_layer(colormap: str, forecast_start_date: str, variable: str, leadtime: int = 0):
+    def update_cog_layer(colormap: str, forecast_start_date: str, band_index: int, leadtime: int = 0):
         """
         Updates the COG layers on the map based on selected colormap, date, and leadtime.
 
@@ -289,7 +297,7 @@ def register_callbacks(app: dash.Dash):
 
         cog_asset = cog_assets[leadtime]
         cog_href = cog_asset.href
-        tile_url = get_tile_url(cog_href) + f"&colormap_name={colormap}&rescale=0,1&bidx=1"
+        tile_url = get_tile_url(cog_href) + f"&colormap_name={colormap}&rescale=0,1&bidx={band_index}"
 
         logging.info("tile_url:", tile_url)
 

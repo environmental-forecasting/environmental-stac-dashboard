@@ -121,7 +121,7 @@ class STAC:
 
         return None
 
-    def get_asset_band_names(self, collection_id: str, forecast_reference_time: str, asset_id):
+    def get_asset_bands(self, collection_id: str, forecast_reference_time: str, asset_id) -> dict[str, int]:
         asset_band_props = self.get_asset_band_props(collection_id, forecast_reference_time, asset_id)
-        band_names = [band["name"] for band in asset_band_props]
-        return band_names
+        bands = {band["name"]: band["index"] for band in asset_band_props}
+        return bands

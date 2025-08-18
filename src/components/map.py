@@ -74,6 +74,7 @@ leaflet_map = html.Div(
                     id="variable-dropdown",
                     # options=[{"label": var, "value": var} for var in VARIABLES],
                     # value=VARIABLES[0],
+                    value=1,
                     clearable=False,
                 ),
                 html.Label("Select Colormap:"),
