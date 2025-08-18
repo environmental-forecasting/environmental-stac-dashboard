@@ -1,8 +1,8 @@
-# icenet-dashboard
+# environmental-stac-dashboard
 
-This repository contains a dashboard for visualising IceNet forecasts. It is built on top of [Plotly Dash](https://dash.plotly.com/) to serve Cloud Optimized GeoTIFF (COG) files from [icenet-dashboard-preprocessor](https://github.com/icenet-ai/icenet-dashboard-preprocessor) using [icenet-tiler-api](https://github.com/icenet-ai/icenet-tiler-api).
+This repository contains a dashboard for visualising earth system forecast predictions. It is built on top of [Plotly Dash](https://dash.plotly.com/) to serve Cloud Optimized GeoTIFF (COG) files from [environmental-stac-generator](https://github.com/environmental-forecasting/environmental-stac-generator) using [icenet-tiler-api](https://github.com/icenet-ai/icenet-tiler-api).
 
-Depends on `icenet-tiler-api` and `icenet-dashboard-preprocessor`.
+Depends on `icenet-tiler-api` and `environmental-stac-generator`.
 
 ## Usage
 
@@ -13,8 +13,8 @@ This application is designed to be used in conjunction with [icenet-tiler-api](h
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/icenet-ai/icenet-dashboard.git
-cd icenet-dashboard
+git clone https://github.com/environmental-forecasting/environmental-stac-dashboard.git
+cd environmental-stac-dashboard
 ```
 
 ### 2. Install requirements
@@ -28,4 +28,4 @@ pip install -r requirements.txt
 ```bash
 make run
 ```
-Open a browser and navigate to [http://localhost:8001](http://localhost:8001).
+Open a browser and navigate to [http://localhost:8005](http://localhost:8005).

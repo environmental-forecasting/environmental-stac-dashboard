@@ -8,7 +8,6 @@ DEFAULT_CENTER = [0, 0]
 DEFAULT_ZOOM = 2
 AVAILABLE_COLORMAPS = ColorMaps().list()
 DEFAULT_COLORMAP = "blues_r"
-VARIABLES = ["SIC Mean"]
 
 # Blues_r for colourbar which uses different input to titiler's approach to colour:
 blues_r = [
@@ -57,6 +56,8 @@ leaflet_map = html.Div(
             style={"width": "inherit", "height": "inherit"},
             center=DEFAULT_CENTER,
             zoom=DEFAULT_ZOOM,
+            zoomDelta=0.1,
+            zoomSnap=0.1,
             id="map",
         ),
         # Controls for map manipulation
@@ -71,8 +72,8 @@ leaflet_map = html.Div(
                 html.Label("Select Variable:"),
                 dcc.Dropdown(
                     id="variable-dropdown",
-                    options=[{"label": var, "value": var} for var in VARIABLES],
-                    value=VARIABLES[0],
+                    # options=[{"label": var, "value": var} for var in VARIABLES],
+                    # value=VARIABLES[0],
                     clearable=False,
                 ),
                 html.Label("Select Colormap:"),

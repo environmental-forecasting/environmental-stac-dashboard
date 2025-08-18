@@ -53,7 +53,7 @@ layout = dmc.MantineProvider(
                                             dmc.Slider(
                                                 id="leadtime-slider",
                                                 min=0, # Stub
-                                                max=0, # Stub
+                                                max=1, # Stub
                                                 step=1,
                                                 value=0,
                                                 # marks=[
@@ -68,6 +68,8 @@ layout = dmc.MantineProvider(
                                                 color="black",
                                                 showLabelOnHover=True,
                                                 labelAlwaysOn=False,
+                                                persistence=True,
+                                                persistence_type="session",
                                             ),
                                             dmc.Text(
                                                 id="selected-time",

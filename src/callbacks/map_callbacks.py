@@ -6,16 +6,12 @@ from urllib.parse import urlparse, urlunparse
 import dash
 import dash_leaflet as dl
 import pandas as pd
-from config import CATALOG_PATH, DATA_URL, TITILER_URL
+from config import STAC_FASTAPI_URL, TITILER_URL
 from datetime import datetime, timedelta
 from dash import ALL, MATCH, Input, Output, State, no_update
+from pystac.utils import datetime_to_str, str_to_datetime
 from stac.process import (
     STAC,
-    get_all_forecast_dates,
-    get_all_forecast_start_dates,
-    get_cog_path,
-    get_collections,
-    get_leadtime,
 )
 
 from .utils import convert_colormap_to_colorscale
@@ -56,8 +52,10 @@ def get_tile_url(cog_path: str):
     Raises:
         None
     """
-    cog_path = normalise_url_path(f"{DATA_URL}/{cog_path}")
     return f"{TITILER_URL}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={cog_path}"
+    # To return tiles back in EPSG:6931
+    # Useful when Leaflet reprojection code is working.
+    # return f"{TITILER_URL}/cog/tiles/EPSG6931/{{z}}/{{x}}/{{y}}?url={cog_path}"
 
 
 # Callback function that will update the output container based on input
@@ -68,6 +66,11 @@ def register_callbacks(app: dash.Dash):
     Args:
         The Dash app instance.
     """
+
+    stac = STAC(STAC_FASTAPI_URL)
+
+    # Get first `collection_id` for testing
+    collection_id = stac.get_catalog_collection_ids(resolve=True)[0].id
 
     # Get window width
     app.clientside_callback(
@@ -106,48 +109,80 @@ def register_callbacks(app: dash.Dash):
                 - Initial visible month
                 - Disabled days for the date picker
         """
-        forecast_dates = get_all_forecast_dates(CATALOG_PATH, collection_id="north")
+        try:
+            forecast_init_dates = stac.get_collection_forecast_init_dates(collection_id)
+        except Exception as e:
+            logging.error(f"Failed to retrieve forecast dates: {e}")
+            return [None, None, None, None, None]
 
-        if forecast_dates:
-            forecast_start_dates_str = forecast_dates.keys()
-            forecast_start_dates = [datetime.strptime(date_str, "%Y-%m-%d") for date_str in forecast_start_dates_str]
-            forecast_start_dates = sorted(forecast_start_dates)
+        if forecast_init_dates:
+            forecast_start_dates = sorted(forecast_init_dates)
+            forecast_dates_dict = {
+                d.strftime("%Y-%m-%d"): (
+                    d
+                    + timedelta(
+                        days=stac.get_item_leadtime(
+                            collection_id, forecast_reference_time=datetime_to_str(d)
+                        )
+                    )
+                )
+                .date()
+                .isoformat()
+                for d in forecast_start_dates
+            }
 
             # Define start and end `forecast_init_dates` for available IceNet forecasts
             logging.debug("Forecast start dates available:", forecast_start_dates)
 
-            # Note to self: Dates should be in format 'YYYY-MM-DD'
-            min_date_allowed = forecast_start_dates[0]
-            max_date_allowed = forecast_start_dates[-1]
-            initial_visible_month = max_date_allowed
+            # Note to self: Dates should be in format '%Y-%m-%dT%H:%M:%SZ'
+            min_date = forecast_start_dates[0].date().isoformat()
+            max_date = forecast_start_dates[-1].date().isoformat()
+            initial_visible_month = max_date
 
-            logging.debug("min_date_allowed", min_date_allowed)
-            logging.debug("max_date_allowed", max_date_allowed)
+            logging.debug("min_date/max_date", min_date, max_date)
 
             # Create list of days we don't have forecasts for, so, we can disable them in date picker.
-            date_range = pd.date_range(min_date_allowed, max_date_allowed, freq="D")
-            forecast_start_date_set = set(d.date() for d in forecast_start_dates)
-            disabled_days = [d.date() for d in date_range if d.date() not in forecast_start_date_set]
+            date_range = pd.date_range(min_date, max_date)
+            available_dates = {d.date() for d in forecast_start_dates}
+            disabled_dates = [d.date().isoformat() for d in date_range if d.date() not in available_dates]
+
             logging.debug(
-                f"Creating list of dates starting from {min_date_allowed} to {max_date_allowed}"
+                f"Creating list of dates starting from {min_date} to {max_date}"
             )
-            logging.debug("Disabled days:", disabled_days)
+            logging.debug("Disabled days:", disabled_dates)
         else:
-            min_date_allowed = None
-            max_date_allowed = None
+            min_date = None
+            max_date = None
             initial_visible_month = None
-            disabled_days = None
+            disabled_dates = None
             logging.debug(
                 "No forecast dates loaded, issue connecting to/loading STAC Catalog?"
             )
 
         return [
-            forecast_dates,
-            min_date_allowed,
-            max_date_allowed,
+            forecast_dates_dict,
+            min_date,
+            max_date,
             initial_visible_month,
-            disabled_days,
+            disabled_dates,
         ]
+
+
+    @app.callback(
+        Output("variable-dropdown", "options"),
+        Input("forecast-init-date-picker", "value"),
+        Input("leadtime-slider", "value"),
+        prevent_initial_call=True,
+    )
+    def update_available_variables(selected_date, leadtime: int):
+        # forecast_start_date = datetime.strptime(selected_date, "%Y-%m-%d")
+        # Convert to ISO 8601 format which is what the "forecast:reference_time" property is stored as
+        forecast_reference_time_str = datetime.strptime(selected_date, "%Y-%m-%d").isoformat() + "Z"
+        available_vars = stac.get_asset_band_names(
+            collection_id, forecast_reference_time_str, forecast_reference_time_str
+        )
+        return available_vars if available_vars else None
+
 
     @app.callback(
         Output("time-slider-div", "style"),
@@ -162,23 +197,39 @@ def register_callbacks(app: dash.Dash):
         State("time-slider-div", "style"),
         prevent_initial_call=True,
     )
-    def update_leadtime_slider(window_width: str, selected_date, leadtime: int, forecast_dates: dict, slider_style):
+    def update_leadtime_slider(
+        window_width: str,
+        selected_date: str,
+        leadtime: int,
+        forecast_dates: dict,
+        slider_style,
+    ):
+        """
+        selected_date: String format of 'YYYY-MM-DD'
+        forecast_dates: Dict with keys in 'YYYY-MM-DD', and values in format of '%Y-%m-%dT%H-%M'
+        """
         if not selected_date or selected_date not in forecast_dates:
             return no_update
 
-        forecast_start_date_str = selected_date
-        forecast_end_date_str = forecast_dates[selected_date]
-        forecast_start_date = datetime.strptime(forecast_start_date_str, "%Y-%m-%d")
-        forecast_end_date = datetime.strptime(forecast_end_date_str, "%Y-%m-%d")
+        forecast_start_date = datetime.strptime(selected_date, "%Y-%m-%d")
+        forecast_end_date = str_to_datetime(forecast_dates[selected_date])
+
+        logging.info("forecast start date:", forecast_start_date)
+        logging.info("forecast end date:", forecast_end_date)
 
         num_days = (forecast_end_date - forecast_start_date).days
-        leadtime_min = 0
-        leadtime_max = num_days
-        leadtimes = list(range(num_days + 1))
-        marks = {
-            idx : (forecast_start_date + timedelta(days=idx)).strftime("%Y-%m-%d") for idx in leadtimes
-        }
 
+        # Account for leadtime zero-indexing
+        leadtime_min = 0
+        leadtime_max = num_days - 1
+        leadtimes = list(range(num_days))
+
+        # # For dcc.Slider
+        # marks = {
+        #     idx : (forecast_start_date + timedelta(days=idx)).strftime("%Y-%m-%d") for idx in leadtimes
+        # }
+
+        # # For dash mantine slider
         # Dynamically calculate step size based on window width
         desired_marks = max(2, window_width // 100)
         step = max(1, math.ceil(len(leadtimes) / desired_marks))
@@ -202,10 +253,11 @@ def register_callbacks(app: dash.Dash):
         Output("cog-results-layer", "children"),
         Input("colormap-dropdown", "value"),
         Input("forecast-init-date-picker", "value"),
+        Input("variable-dropdown", "value"),
         Input("leadtime-slider", "value"),
         prevent_initial_call=True,
     )
-    def update_cog_layer(colormap: str, forecast_start_date: str, leadtime: int = 0):
+    def update_cog_layer(colormap: str, forecast_start_date: str, variable: str, leadtime: int = 0):
         """
         Updates the COG layers on the map based on selected colormap, date, and leadtime.
 
@@ -218,46 +270,40 @@ def register_callbacks(app: dash.Dash):
         Returns:
             list: A list of Overlay objects representing the COG layers with updated tile URLs and options.
         """
-        collections = get_collections(CATALOG_PATH)
+
+        if not forecast_start_date:
+            return no_update
+
+        # Convert to ISO 8601 format expected
+        forecast_reference_time_str = datetime.strptime(forecast_start_date, "%Y-%m-%d").isoformat() + "Z"
+
         tile_layers = []
-        for i, collection_id in enumerate(collections):
-            logging.debug("collections", collections)
-            logging.debug(f"Colormap changed to {colormap}")
 
-            if not forecast_start_date:
-                return no_update  # No tiles to display
+        # Get COG assets for this date
+        cogs = stac.get_item_cogs(collection_id, forecast_reference_time_str)
+        cog_assets = list(cogs.values())
 
-            selected_item = get_cog_path(
-                CATALOG_PATH, collection_id, forecast_start_date, leadtime
-            )
-            if selected_item:
-                logging.debug(
-                    "This is the selected_item:",
-                    selected_item,
-                    "in collection:",
-                    collection_id,
-                )
+        if leadtime >= len(cog_assets):
+            logging.warning(f"Leadtime {leadtime} out of range for {collection_id}")
+            return no_update
 
-                # Get the tile URL from Titiler
-                tile_url = (
-                    get_tile_url(selected_item)
-                    + f"&colormap_name={colormap}&rescale=0,1"
-                )
-                tile_url = normalise_url_path(tile_url)
-                logging.debug("tile_url:", tile_url)
+        cog_asset = cog_assets[leadtime]
+        cog_href = cog_asset.href
+        tile_url = get_tile_url(cog_href) + f"&colormap_name={colormap}&rescale=0,1&bidx=1"
 
-                collection_layer = dl.Overlay(
-                    dl.TileLayer(
-                        id={"type": "cog-collections", "index": i},
-                        url=tile_url,
-                        zIndex=100,
-                        opacity=1,
-                    ),
-                    name=collection_id,
-                    checked=True,
-                )
+        logging.info("tile_url:", tile_url)
 
-                tile_layers.append(collection_layer)
+        layer = dl.Overlay(
+            dl.TileLayer(
+                id={"type": "cog-collections", "index": 0},
+                url=tile_url,
+                zIndex=100,
+                opacity=1,
+            ),
+            name=collection_id,
+            checked=True,
+        )
+        tile_layers.append(layer)
 
         return tile_layers
 
