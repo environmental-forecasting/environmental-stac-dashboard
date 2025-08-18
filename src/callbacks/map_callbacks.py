@@ -483,25 +483,3 @@ def register_callbacks(app: dash.Dash):
 
         return style, (["fixed"] if is_fixed else []), disabled_inputs, disabled_inputs
 
-
-    @app.callback(
-        Output({"type": "cog-collections", "index": ALL}, "opacity"),
-        Input("opacity-slider", "value"),
-        State({"type": "cog-collections", "index": ALL}, "opacity"),
-    )
-    def update_cog_layer_opacity(opacity: float, current_opacity: list[float]):
-        """Update the opacity of all COG collections layers.
-
-        This function updates the opacity of all 'cog-collections' layers based on the
-        value provided by the 'opacity-slider'.
-
-        Args:
-            opacity: The new opacity value, range [0, 1].
-            current_opacity: A list of the current opacity values for all layers.
-
-        Returns:
-            A list containing the updated opacity value for each layer.
-        """
-        logging.debug(f"Opacity changed to {opacity}")
-
-        return [opacity] * len(current_opacity)

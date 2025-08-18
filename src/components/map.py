@@ -146,19 +146,6 @@ leaflet_map = html.Div(
                         },
                     ),
                 ], style={}),
-
-                html.Label("Opacity Control:"),
-                dcc.Slider(
-                    id="opacity-slider",
-                    min=0.0,
-                    max=1.0,
-                    # step=0.1,
-                    value=1.0,
-                    updatemode="drag",
-                    persistence="True",
-                    persistence_type="memory",
-                    # marks={0: '0', 0.2: '0.2', 0.4: '0.4', 0.6: '0.6', 0.8: '0.8', 1: '1'},
-                ),
             ],
             style={
                 "position": "absolute",
