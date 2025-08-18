@@ -50,6 +50,7 @@ leaflet_map = html.Div(
                 ),
                 dl.ScaleControl(position="bottomright"),
                 dl.FullScreenControl(position="bottomleft"),
+                dl.EasyButton(icon="ti ti-settings", title="controls", id="controls-btn"),
             ],
             crs="EPSG3857",
             attributionControl=True,
@@ -168,8 +169,10 @@ leaflet_map = html.Div(
                 "borderRadius": "10px",
                 "boxShadow": "0 6px 8px rgba(0, 0, 0, 0.1)",
                 "width": "250px",
+                "display": "inline-block",
                 "zIndex": 1000,  # Ensure controls are on top of the map
             },
+            id="controls"
         ),
         dcc.Store(id="forecast-dates-store", data=None),
         dcc.Store(id="fix-colorbar-range", data=None),

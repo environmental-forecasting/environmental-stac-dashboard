@@ -6,6 +6,7 @@ from callbacks import map_callbacks
 
 stylesheets = [
     "https://cdn.web.bas.ac.uk/bas-style-kit/0.7.3/css/bas-style-kit.min.css",
+    "https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.34.1/tabler-icons.min.css",
     dbc.themes.BOOTSTRAP,
     dmc.styles.ALL,
 ]

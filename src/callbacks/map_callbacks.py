@@ -413,6 +413,26 @@ def register_callbacks(app: dash.Dash):
             min_val, max_val = 0, 1
         return colorscale, min_val, max_val
 
+    @app.callback(
+        Output("controls", "style"),
+        Input("controls-btn", "n_clicks"),
+        State("controls", "style"),
+        prevent_initial_call=True
+    )
+    def toggle_main_controller(n_clicks, current_style):
+        """
+        Callback to toggle main controls div visibility
+        """
+        if not current_style:
+            current_style = {}
+
+        current_display = current_style.get("display", "inline-block")
+        new_display = "none" if current_display == "inline-block" else "inline-block"
+        new_style = current_style.copy()
+        new_style["display"] = new_display
+
+        return new_style
+
 
     @app.callback(
         Output("fix-colorbar-button", "style"),
