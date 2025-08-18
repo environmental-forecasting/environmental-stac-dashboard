@@ -10,6 +10,7 @@ from config import CATALOG_PATH, DATA_URL, TITILER_URL
 from datetime import datetime, timedelta
 from dash import ALL, MATCH, Input, Output, State, no_update
 from stac.process import (
+    STAC,
     get_all_forecast_dates,
     get_all_forecast_start_dates,
     get_cog_path,
