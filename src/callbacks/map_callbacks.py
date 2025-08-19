@@ -67,8 +67,6 @@ def register_callbacks(app: dash.Dash):
         The Dash app instance.
     """
 
-    stac = STAC(STAC_FASTAPI_URL)
-
     # # Get first `collection_id` for testing
     # collection_id = stac.get_catalog_collection_ids(resolve=True)[0].id
 
@@ -90,6 +88,7 @@ def register_callbacks(app: dash.Dash):
         [Input("page-load-trigger", "data")],
     )
     def update_collections(_):
+        stac = STAC(STAC_FASTAPI_URL)
         collections = stac.get_catalog_collection_ids(resolve=True)
         options = []
         for collection in collections:
@@ -130,6 +129,7 @@ def register_callbacks(app: dash.Dash):
         if not collection_ids:
             return [None, None, None, None, None, None]
 
+        stac = STAC(STAC_FASTAPI_URL)
         all_forecast_dates = set()
         forecast_dates_dict = {}
 
@@ -201,6 +201,8 @@ def register_callbacks(app: dash.Dash):
         """
         if not selected_date or not collection_ids:
             return []
+
+        stac = STAC(STAC_FASTAPI_URL)
 
         # Convert to ISO 8601 format which is what the "forecast:reference_time" property is stored as
         forecast_reference_time_str = datetime.strptime(selected_date, "%Y-%m-%d").isoformat() + "Z"
@@ -335,6 +337,8 @@ def register_callbacks(app: dash.Dash):
 
         if not forecast_start_date:
             return no_update, no_update, no_update
+
+        stac = STAC(STAC_FASTAPI_URL)
 
         # Convert to ISO 8601 format expected
         forecast_reference_time_str = datetime.strptime(forecast_start_date, "%Y-%m-%d").isoformat() + "Z"
