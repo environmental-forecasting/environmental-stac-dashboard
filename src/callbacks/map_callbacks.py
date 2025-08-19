@@ -6,7 +6,7 @@ from urllib.parse import urlparse, urlunparse
 import dash
 import dash_leaflet as dl
 import pandas as pd
-from config import STAC_FASTAPI_URL, TITILER_URL
+from config import STAC_FASTAPI_URL, TILER_URL
 from datetime import datetime, timedelta
 from dash import ALL, MATCH, Input, Output, State, no_update
 from pystac.utils import datetime_to_str, str_to_datetime
@@ -52,10 +52,10 @@ def get_tile_url(cog_path: str):
     Raises:
         None
     """
-    return f"{TITILER_URL}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={cog_path}"
+    return f"{TILER_URL}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={cog_path}"
     # To return tiles back in EPSG:6931
     # Useful when Leaflet reprojection code is working.
-    # return f"{TITILER_URL}/cog/tiles/EPSG6931/{{z}}/{{x}}/{{y}}?url={cog_path}"
+    # return f"{TILER_URL}/cog/tiles/EPSG6931/{{z}}/{{x}}/{{y}}?url={cog_path}"
 
 
 # Callback function that will update the output container based on input
@@ -86,6 +86,7 @@ def register_callbacks(app: dash.Dash):
             Output("collections-dropdown", "options"),
         ],
         [Input("page-load-trigger", "data")],
+        prevent_initial_callback=True,
     )
     def update_collections(_):
         stac = STAC(STAC_FASTAPI_URL)
@@ -109,6 +110,7 @@ def register_callbacks(app: dash.Dash):
             Input("page-load-trigger", "data"),
             Input("collections-dropdown", "value"),
         ],
+        prevent_initial_callback=True,
     )
     def update_forecast_start_dates(
         _, collection_ids: list
@@ -365,7 +367,7 @@ def register_callbacks(app: dash.Dash):
                     max_val = fixed_max if fixed_max is not None else 1
                 else:
                     # Get min/max to rescale the 0-255 image to data range
-                    band_stats = get_cog_band_statistics(TITILER_URL, cog_url=cog_href, band_index=band_index)
+                    band_stats = get_cog_band_statistics(TILER_URL, cog_url=cog_href, band_index=band_index)
                     min_val = band_stats.get("min", 0)
                     max_val = band_stats.get("max", 1)
 
