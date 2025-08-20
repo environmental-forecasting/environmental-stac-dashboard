@@ -9,7 +9,7 @@ Here are some ways you can contribute:
 
 ### Report Bugs
 
-Report bugs at https://github.com/icenet-ai/icenet-dashboard/issues.
+Report bugs at https://github.com/environmental-forecasting/environmental-stac-dashboard/issues.
 
 If you are reporting a bug, please include:
 
@@ -29,13 +29,13 @@ and "help wanted" is open to whoever wants to implement it.
 
 ### Write Documentation
 
-`icenet-dashboard` could always use more documentation, whether as part of the
-official `icenet-dashboard` docs, in docstrings, or even on the web in blog posts,
+`environmental-stac-dashboard` could always use more documentation, whether as part of the
+official `environmental-stac-dashboard` docs, in docstrings, or even on the web in blog posts,
 articles, and such.
 
 ### Submit Feedback
 
-The best way to send feedback is to file an issue at https://github.com/icenet-ai/icenet-dashboard/issues.
+The best way to send feedback is to file an issue at https://github.com/environmental-forecasting/environmental-stac-dashboard/issues.
 
 If you are proposing a feature:
 
