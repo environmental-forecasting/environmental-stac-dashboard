@@ -9,5 +9,6 @@ dash_mantine_components
 gunicorn
 pandas
 pystac
+pystac-client
 rio-tiler
 rioxarray

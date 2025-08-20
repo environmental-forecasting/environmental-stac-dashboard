@@ -1,4 +1,10 @@
+import math
+import requests
 from rio_tiler.colormap import ColorMaps
+
+
+def round_2dp(value):
+    return math.floor(value * 100) / 100
 
 
 def convert_colormap_to_colorscale(cmap: str):
@@ -30,3 +36,17 @@ def convert_colormap_to_colorscale(cmap: str):
         for i in range(len(cmap_dict))
     ]
     return colorscale
+
+
+def get_cog_band_statistics(TITILER_URL: str, cog_url: str, band_index: int) -> dict:
+    stats_url = f"{TITILER_URL}/cog/statistics"
+    r = requests.get(stats_url, params={"url": cog_url, "bidx": band_index})
+    r.raise_for_status()
+    stats = r.json()
+
+    # Use the first key in the stats dictionary,
+    # this should match the band returned.
+    first_band_key = next(iter(stats))
+    band_stats = stats[first_band_key]
+
+    return band_stats

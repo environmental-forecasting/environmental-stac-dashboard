@@ -2,10 +2,8 @@ import os
 import logging
 
 # Get config from environmental variables
-TITILER_URL = os.getenv("TITILER_URL", "http://localhost:8000")
-DATA_URL = os.getenv("DATA_URL", "http://localhost:8002")
-CATALOG_PATH = os.getenv("CATALOG_PATH", f"{DATA_URL}/data/stac/catalog.json")
+STAC_FASTAPI_URL = os.getenv("STAC_FASTAPI_URL", "http://localhost:8000")
+TILER_URL = os.getenv("TILER_URL", "http://localhost:8002")
 
-logging.info("TITILER URL:", TITILER_URL)
-logging.info("DATA URL:", DATA_URL)
-logging.info("CATALOG_PATH:", CATALOG_PATH)
+logging.info("TILER URL:", TILER_URL)
+logging.info("STAC_FASTAPI_URL:", STAC_FASTAPI_URL)

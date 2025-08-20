@@ -17,6 +17,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Setting PYTHONPATH to `/app/src` so Gunicorn can find the submodules, else, error.
 ENV PYTHONPATH=/app/src
-ENV DASHBOARD_PORT=8001
+ENV DASHBOARD_PORT=${DASHBOARD_PORT:-8005}
 
 CMD ["sh", "-c", "gunicorn src.app:server -b 0.0.0.0:${DASHBOARD_PORT}"]
