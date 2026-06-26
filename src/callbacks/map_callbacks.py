@@ -10,11 +10,19 @@ from config import STAC_FASTAPI_URL, TILER_URL
 from datetime import datetime, timedelta
 from dash import ALL, MATCH, Input, Output, State, no_update
 from pystac.utils import datetime_to_str, str_to_datetime
+from functools import lru_cache
 from stac.process import (
     STAC,
 )
 
 from .utils import convert_colormap_to_colorscale, get_cog_band_statistics, round_2dp
+
+
+@lru_cache(maxsize=1)
+def _get_stac_client() -> STAC:
+    """Return a cached STAC client singleton to avoid re-creating
+    HTTP connections on every callback invocation."""
+    return STAC(STAC_FASTAPI_URL)
 
 
 def normalise_url_path(url: str) -> str:
@@ -89,7 +97,7 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_callback=True,
     )
     def update_collections(_):
-        stac = STAC(STAC_FASTAPI_URL)
+        stac = _get_stac_client()
         collections = stac.get_catalog_collection_ids(resolve=True)
         options = []
         for collection in collections:
@@ -131,7 +139,7 @@ def register_callbacks(app: dash.Dash):
         if not collection_ids:
             return [None, None, None, None, None, None]
 
-        stac = STAC(STAC_FASTAPI_URL)
+        stac = _get_stac_client()
         all_forecast_dates = set()
         forecast_dates_dict = {}
 
@@ -204,7 +212,7 @@ def register_callbacks(app: dash.Dash):
         if not selected_date or not collection_ids:
             return []
 
-        stac = STAC(STAC_FASTAPI_URL)
+        stac = _get_stac_client()
 
         # Convert to ISO 8601 format which is what the "forecast:reference_time" property is stored as
         forecast_reference_time_str = datetime.strptime(selected_date, "%Y-%m-%d").isoformat() + "Z"
@@ -265,8 +273,8 @@ def register_callbacks(app: dash.Dash):
         forecast_start_date = datetime.strptime(selected_date, "%Y-%m-%d")
         forecast_end_date = str_to_datetime(forecast_dates[selected_date])
 
-        logging.info("forecast start date:", forecast_start_date)
-        logging.info("forecast end date:", forecast_end_date)
+        logging.info(f"forecast start date: {forecast_start_date}")
+        logging.info(f"forecast end date: {forecast_end_date}")
 
         num_days = (forecast_end_date - forecast_start_date).days
 
@@ -340,7 +348,7 @@ def register_callbacks(app: dash.Dash):
         if not forecast_start_date:
             return no_update, no_update, no_update
 
-        stac = STAC(STAC_FASTAPI_URL)
+        stac = _get_stac_client()
 
         # Convert to ISO 8601 format expected
         forecast_reference_time_str = datetime.strptime(forecast_start_date, "%Y-%m-%d").isoformat() + "Z"
@@ -377,7 +385,7 @@ def register_callbacks(app: dash.Dash):
 
                 tile_url = get_tile_url(cog_href) + f"&colormap_name={colormap}&rescale={min_val},{max_val}&bidx={band_index}"
 
-                print("tile_url:", tile_url)
+                logging.debug(f"tile_url: {tile_url}")
 
                 layer = dl.Overlay(
                     dl.TileLayer(
