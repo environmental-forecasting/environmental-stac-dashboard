@@ -60,7 +60,7 @@ class STAC:
 
     def get_collection_extents(self, collection_id):
         collection = self._catalog.get_collection(collection_id)
-        print(collection)
+        logger.debug(f"Collection: {collection}")
         temporal_extent = collection.extent.temporal.intervals[0]
         spatial_extent = collection.extent.spatial.bboxes[0]
         return temporal_extent, spatial_extent
