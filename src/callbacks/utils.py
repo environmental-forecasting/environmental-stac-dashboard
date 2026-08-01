@@ -42,17 +42,6 @@ def convert_colormap_to_colorscale(cmap: str):
     ]
 
 
-def to_tiler_asset_url(href: str, file_server_url: str, file_server_internal_url: str) -> str:
-    """Rewrite public file-server hrefs so TiTiler can fetch them on the Docker network."""
-    if not file_server_url or not file_server_internal_url:
-        return href
-    public = file_server_url.rstrip("/")
-    internal = file_server_internal_url.rstrip("/")
-    if href == public or href.startswith(public + "/"):
-        return internal + href[len(public) :]
-    return href
-
-
 def get_cog_band_statistics(TITILER_URL: str, cog_url: str, band_index: int) -> dict:
     stats_url = f"{TITILER_URL}/cog/statistics"
     r = requests.get(stats_url, params={"url": cog_url, "bidx": band_index})

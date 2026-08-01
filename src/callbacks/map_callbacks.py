@@ -26,11 +26,12 @@ from stac.timefmt import (
     to_calendar_day,
 )
 
+from map import WEB_MERCATOR_QUAD, build_cog_tile_url, to_tiler_asset_url
+
 from .utils import (
     convert_colormap_to_colorscale,
     get_cog_band_statistics,
     round_2dp,
-    to_tiler_asset_url,
 )
 
 
@@ -63,23 +64,26 @@ def normalise_url_path(url: str) -> str:
 
 
 # Function to generate tile URL for a STAC Item
-def get_tile_url(cog_path: str):
+def get_tile_url(cog_path: str, tile_matrix_set: str = WEB_MERCATOR_QUAD) -> str:
     """
-    Returns the tile URL for the given STAC Item (i.e. COG path).
+    Return the XYZ tile URL template for a COG asset href.
 
     Args:
         cog_path: Public STAC asset href for the COG. Rewritten for TiTiler fetch.
+        tile_matrix_set: TiTiler tile matrix set id. Defaults to Web Mercator.
 
     Returns:
-        The URL using the specified tiler and format, with placeholders for z, x, y.
+        TiTiler XYZ template URL with ``{z}``, ``{x}``, and ``{y}`` placeholders.
     """
     # Browser hits TILER_URL; TiTiler itself fetches `url=`, so that must be
     # reachable from the titiler container (file-server Docker DNS).
-    tiler_cog = to_tiler_asset_url(cog_path, FILE_SERVER_URL, FILE_SERVER_INTERNAL_URL)
-    return f"{TILER_URL}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={tiler_cog}"
-    # To return tiles back in EPSG:6931
-    # Useful when Leaflet reprojection code is working.
-    # return f"{TILER_URL}/cog/tiles/EPSG6931/{{z}}/{{x}}/{{y}}?url={cog_path}"
+    return build_cog_tile_url(
+        cog_path,
+        tiler_url=TILER_URL,
+        file_server_url=FILE_SERVER_URL,
+        file_server_internal_url=FILE_SERVER_INTERNAL_URL,
+        tile_matrix_set=tile_matrix_set,
+    )
 
 
 def _end_calendar_day_from_init(row: dict) -> str | None:
