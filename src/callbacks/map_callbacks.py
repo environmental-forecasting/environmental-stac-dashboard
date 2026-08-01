@@ -6,7 +6,13 @@ from urllib.parse import urlparse, urlunparse
 import dash
 import dash_leaflet as dl
 import pandas as pd
-from config import STAC_FASTAPI_URL, TILER_URL
+from config import (
+    FILE_SERVER_INTERNAL_URL,
+    FILE_SERVER_URL,
+    STAC_FASTAPI_URL,
+    TILER_INTERNAL_URL,
+    TILER_URL,
+)
 from datetime import datetime, timedelta
 from dash import ALL, MATCH, Input, Output, State, no_update
 from pystac.utils import datetime_to_str, str_to_datetime
@@ -15,7 +21,12 @@ from stac.process import (
     STAC,
 )
 
-from .utils import convert_colormap_to_colorscale, get_cog_band_statistics, round_2dp
+from .utils import (
+    convert_colormap_to_colorscale,
+    get_cog_band_statistics,
+    round_2dp,
+    to_tiler_asset_url,
+)
 
 
 @lru_cache(maxsize=1)
@@ -52,7 +63,7 @@ def get_tile_url(cog_path: str):
     Returns the tile URL for the given STAC Item (i.e. COG path).
 
     Args:
-        cog_path: The path to the Cloud Optimized GeoTIFF file relative to `DATA_URL`.
+        cog_path: Public STAC asset href for the COG. Rewritten for TiTiler fetch.
 
     Returns:
         The URL using the specified tiler and format, with placeholders for z, x, y.
@@ -60,7 +71,10 @@ def get_tile_url(cog_path: str):
     Raises:
         None
     """
-    return f"{TILER_URL}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={cog_path}"
+    # Browser hits TILER_URL; TiTiler itself fetches `url=`, so that must be
+    # reachable from the titiler container (file-server Docker DNS).
+    tiler_cog = to_tiler_asset_url(cog_path, FILE_SERVER_URL, FILE_SERVER_INTERNAL_URL)
+    return f"{TILER_URL}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={tiler_cog}"
     # To return tiles back in EPSG:6931
     # Useful when Leaflet reprojection code is working.
     # return f"{TILER_URL}/cog/tiles/EPSG6931/{{z}}/{{x}}/{{y}}?url={cog_path}"
@@ -375,7 +389,12 @@ def register_callbacks(app: dash.Dash):
                     max_val = fixed_max if fixed_max is not None else 1
                 else:
                     # Get min/max to rescale the 0-255 image to data range
-                    band_stats = get_cog_band_statistics(TILER_URL, cog_url=cog_href, band_index=band_index)
+                    tiler_cog = to_tiler_asset_url(
+                        cog_href, FILE_SERVER_URL, FILE_SERVER_INTERNAL_URL
+                    )
+                    band_stats = get_cog_band_statistics(
+                        TILER_INTERNAL_URL, cog_url=tiler_cog, band_index=band_index
+                    )
                     min_val = band_stats.get("min", 0)
                     max_val = band_stats.get("max", 1)
 

@@ -12,3 +12,4 @@ pystac
 pystac-client
 rio-tiler
 rioxarray
+pydantic-settings

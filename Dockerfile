@@ -19,4 +19,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 ENV PYTHONPATH=/app/src
 ENV DASHBOARD_PORT=${DASHBOARD_PORT:-8005}
 
-CMD ["sh", "-c", "gunicorn src.app:server -b 0.0.0.0:${DASHBOARD_PORT}"]
+CMD ["sh", "-c", "if [ \"$DASHBOARD_DEBUG\" = 'true' ]; then echo 'Starting with hot-reload'; gunicorn --reload src.app:server -b 0.0.0.0:${DASHBOARD_PORT}; else gunicorn src.app:server -b 0.0.0.0:${DASHBOARD_PORT}; fi"]
