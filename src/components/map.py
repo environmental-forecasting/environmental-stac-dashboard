@@ -163,5 +163,6 @@ leaflet_map = html.Div(
         ),
         dcc.Store(id="forecast-dates-store", data=None),
         dcc.Store(id="fix-colorbar-range", data=None),
+        dcc.Store(id="rescale-store", data=None),
     ],
 )
