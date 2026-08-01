@@ -64,6 +64,8 @@ class STAC:
         self._catalog = Client.open(STAC_FASTAPI_URL, stac_io=stac_api_io)
         # Cache full Items by (collection_id, forecast:reference_time).
         self._item_cache: dict[tuple[str, str], Item] = {}
+        # Cache forecast init rows by collection_id (summaries or slim search).
+        self._forecast_inits_cache: dict[str, list[dict[str, Any]]] = {}
 
     def _search_collection(self, collection_id) -> ItemSearch:
         search = self._catalog.search(collections=[collection_id], max_items=None)
@@ -119,14 +121,25 @@ class STAC:
         ``GET /collections/{id}``. Falls back to a slim Item Search when
         summaries are missing or leadtime lengths are not uniform.
 
+        Results are cached per collection on this client so switching
+        selection back and forth does not repeat the API call.
+
         Returns:
             Sorted list of dicts with keys:
             ``datetime``, ``reference_time``, ``end_time``, ``leadtime_length``.
         """
+        cached = self._forecast_inits_cache.get(collection_id)
+        if cached is not None:
+            return cached
+
         from_summaries = self._list_forecast_inits_from_summaries(collection_id)
-        if from_summaries is not None:
-            return from_summaries
-        return self._list_forecast_inits_from_search(collection_id)
+        inits = (
+            from_summaries
+            if from_summaries is not None
+            else self._list_forecast_inits_from_search(collection_id)
+        )
+        self._forecast_inits_cache[collection_id] = inits
+        return inits
 
     def _list_forecast_inits_from_summaries(
         self, collection_id: str
@@ -306,8 +319,9 @@ class STAC:
         return self.get_forecast_item(collection_id, forecast_reference_time)
 
     def clear_item_cache(self) -> None:
-        """Drop cached forecast Items (e.g. after a catalog refresh)."""
+        """Drop cached Items and forecast inits (e.g. after a catalog refresh)."""
         self._item_cache.clear()
+        self._forecast_inits_cache.clear()
 
     def get_item_properties(self, collection_id: str, forecast_reference_time: str):
         item = self.get_forecast_item(collection_id, forecast_reference_time)
