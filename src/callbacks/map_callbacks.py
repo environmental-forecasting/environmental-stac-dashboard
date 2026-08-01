@@ -211,6 +211,9 @@ def register_callbacks(app: dash.Dash):
     def update_collections(_):
         stac = _get_stac_client()
         collections = stac.get_catalog_collection_ids(resolve=True)
+        # Reuse summaries on these Collection objects for forecast inits
+        # so selecting a collection does not GET /collections/{id} again.
+        stac.cache_collections(collections)
         options = []
         for collection in collections:
             option = {"label": collection.id, "value": collection.id}
@@ -238,8 +241,8 @@ def register_callbacks(app: dash.Dash):
         """
         Load available forecast init dates from STAC for the selected collections.
 
-        Uses one slim Item Search per collection (via list_forecast_inits) so
-        leadtime end dates do not need a second request per init.
+        Prefer inits already primed from Collection summaries at dropdown
+        load; otherwise list_forecast_inits falls back to a slim Item Search.
         """
         if not collection_ids:
             return [None, None, None, None, None, None]

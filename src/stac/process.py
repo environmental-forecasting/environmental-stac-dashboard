@@ -66,6 +66,8 @@ class STAC:
         self._item_cache: dict[tuple[str, str], Item] = {}
         # Cache forecast init rows by collection_id (summaries or slim search).
         self._forecast_inits_cache: dict[str, list[dict[str, Any]]] = {}
+        # Cache Collection objects already fetched (e.g. dropdown listing).
+        self._collection_cache: dict[str, Collection] = {}
 
     def _search_collection(self, collection_id) -> ItemSearch:
         search = self._catalog.search(collections=[collection_id], max_items=None)
@@ -100,13 +102,38 @@ class STAC:
         collections = self._catalog.get_all_collections()
         return tuple(collections) if resolve else collections
 
-    def get_collection_items(self, collection_id, resolve: bool = False):
+    def cache_collections(self, collections: Iterable[Collection]) -> None:
+        """
+        Keep Collection objects already in hand and prime forecast-init rows.
+
+        Call this after listing collections for the dropdown so
+        ``list_forecast_inits`` can use summaries without a second
+        ``GET /collections/{id}``.
+        """
+        for collection in collections:
+            self._collection_cache[collection.id] = collection
+            if collection.id in self._forecast_inits_cache:
+                continue
+            inits = self._list_forecast_inits_from_summaries(collection)
+            if inits is not None:
+                self._forecast_inits_cache[collection.id] = inits
+
+    def _get_collection(self, collection_id: str) -> Collection:
+        """Return a Collection, reusing one already cached when present."""
+        cached = self._collection_cache.get(collection_id)
+        if cached is not None:
+            return cached
         collection = self._catalog.get_collection(collection_id)
+        self._collection_cache[collection_id] = collection
+        return collection
+
+    def get_collection_items(self, collection_id, resolve: bool = False):
+        collection = self._get_collection(collection_id)
         items = collection.get_items()
         return tuple(items) if resolve else items
 
     def get_collection_extents(self, collection_id):
-        collection = self._catalog.get_collection(collection_id)
+        collection = self._get_collection(collection_id)
         logger.debug(f"Collection: {collection}")
         temporal_extent = collection.extent.temporal.intervals[0]
         spatial_extent = collection.extent.spatial.bboxes[0]
@@ -117,9 +144,12 @@ class STAC:
         List forecast initialisation times for a collection.
 
         Prefers Collection summaries (``forecast:reference_time`` plus a single
-        shared ``forecast:leadtime_length``) so the date picker needs only
-        ``GET /collections/{id}``. Falls back to a slim Item Search when
-        summaries are missing or leadtime lengths are not uniform.
+        shared ``forecast:leadtime_length``) so the date picker can avoid an
+        Item Search. Falls back to a slim Item Search when summaries are
+        missing or leadtime lengths are not uniform.
+
+        When Collections were already loaded (see ``cache_collections``),
+        summaries are read from that cached object instead of another GET.
 
         Results are cached per collection on this client so switching
         selection back and forth does not repeat the API call.
@@ -132,7 +162,19 @@ class STAC:
         if cached is not None:
             return cached
 
-        from_summaries = self._list_forecast_inits_from_summaries(collection_id)
+        try:
+            collection = self._get_collection(collection_id)
+        except Exception as e:
+            logger.warning(
+                "Could not load collection %s for summaries: %s", collection_id, e
+            )
+            collection = None
+
+        from_summaries = (
+            self._list_forecast_inits_from_summaries(collection)
+            if collection is not None
+            else None
+        )
         inits = (
             from_summaries
             if from_summaries is not None
@@ -142,23 +184,15 @@ class STAC:
         return inits
 
     def _list_forecast_inits_from_summaries(
-        self, collection_id: str
+        self, collection: Collection
     ) -> list[dict[str, Any]] | None:
         """
-        Build init rows from Collection summaries, or None to fall back.
+        Build init rows from a Collection's summaries, or None to fall back.
 
         Requires ``forecast:reference_time`` and exactly one
         ``forecast:leadtime_length`` value so each init can get an end date
-        without listing Items.
+        without listing Items. Does not fetch the Collection from the API.
         """
-        try:
-            collection = self._catalog.get_collection(collection_id)
-        except Exception as e:
-            logger.warning(
-                "Could not load collection %s for summaries: %s", collection_id, e
-            )
-            return None
-
         summaries = collection.summaries
         if summaries is None or summaries.is_empty():
             return None
@@ -185,7 +219,7 @@ class STAC:
             logger.debug(
                 "Collection %s summaries lack a single leadtime length; "
                 "falling back to Item Search",
-                collection_id,
+                collection.id,
             )
             return None
 
@@ -216,7 +250,7 @@ class STAC:
         logger.debug(
             "Loaded %s forecast inits for %s from Collection summaries",
             len(inits),
-            collection_id,
+            collection.id,
         )
         return inits
 
@@ -319,9 +353,10 @@ class STAC:
         return self.get_forecast_item(collection_id, forecast_reference_time)
 
     def clear_item_cache(self) -> None:
-        """Drop cached Items and forecast inits (e.g. after a catalog refresh)."""
+        """Drop cached Items, Collections, and forecast inits."""
         self._item_cache.clear()
         self._forecast_inits_cache.clear()
+        self._collection_cache.clear()
 
     def get_item_properties(self, collection_id: str, forecast_reference_time: str):
         item = self.get_forecast_item(collection_id, forecast_reference_time)
