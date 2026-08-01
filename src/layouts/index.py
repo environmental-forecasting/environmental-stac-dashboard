@@ -2,11 +2,9 @@ import dash_bootstrap_components as dbc
 import dash_mantine_components as dmc
 from components import footer, header, map, sidebar
 from dash import _dash_renderer, dcc, html
-from dash_extensions import EventListener
 from dash_iconify import DashIconify
 
 _dash_renderer._set_react_version("18.2.0")
-event = {"event": "click", "props": ["srcElement.className", "srcElement.innerText"]}
 
 layout = dmc.MantineProvider(
     dbc.Container(
@@ -19,8 +17,6 @@ layout = dmc.MantineProvider(
         },
         children=[
             dcc.Store(id="window-width"),
-            dcc.Interval(id="interval", interval=10000, n_intervals=0), # Check if width needs updating every 10s.
-            html.Div(id="output"),
             dcc.Store(id="page-load-trigger", data=True),
             dbc.Row(dbc.Col(header.header_layout, width=12)),
             dbc.Row(

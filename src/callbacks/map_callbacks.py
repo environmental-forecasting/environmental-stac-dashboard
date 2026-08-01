@@ -175,15 +175,29 @@ def register_callbacks(app: dash.Dash):
     # # Get first `collection_id` for testing
     # collection_id = stac.get_catalog_collection_ids(resolve=True)[0].id
 
-    # Get window width
+    # Publish viewport width on load and whenever the window is resized.
+    # Only write when the width changes so leadtime mark density updates
+    # without a polling Interval.
     app.clientside_callback(
         """
-        function(n) {
-            return top.innerWidth;
+        function(_) {
+            if (!window._stacWindowWidthBound) {
+                window._stacWindowWidthBound = true;
+                let lastWidth = window.innerWidth;
+                window.addEventListener("resize", function() {
+                    const width = window.innerWidth;
+                    if (width === lastWidth) {
+                        return;
+                    }
+                    lastWidth = width;
+                    dash_clientside.set_props("window-width", {data: width});
+                });
+            }
+            return window.innerWidth;
         }
         """,
         Output("window-width", "data"),
-        Input("interval", "n_intervals"),
+        Input("page-load-trigger", "data"),
     )
 
     @app.callback(
