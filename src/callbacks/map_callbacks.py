@@ -30,10 +30,14 @@ from map import (
     WEB_MERCATOR_QUAD,
     MapEngine,
     MapViewMode,
+    bbox_fits_view_mode,
     build_cog_tile_url,
     build_map_state,
+    list_view_mode_options,
+    resolve_engine_for_mode,
     tile_matrix_set_for_mode,
     to_tiler_asset_url,
+    view_mode_and_hint,
 )
 
 from .utils import (
@@ -137,6 +141,7 @@ def _build_forecast_layer_entries(
     min_val: float,
     max_val: float,
     tile_matrix_set: str = WEB_MERCATOR_QUAD,
+    view_mode: str = MapViewMode.GLOBAL_3857.value,
 ) -> list[dict]:
     """
     Build shared forecast layer descriptors for map-state and Leaflet.
@@ -151,6 +156,7 @@ def _build_forecast_layer_entries(
         min_val: Display rescale minimum.
         max_val: Display rescale maximum.
         tile_matrix_set: TiTiler tile matrix set id.
+        view_mode: Active map view mode (filters unfit hemispheres).
 
     Returns:
         List of layer dicts with ``id``, ``title``, ``tileUrl``, ``opacity``,
@@ -159,6 +165,14 @@ def _build_forecast_layer_entries(
     layers: list[dict] = []
     for collection_id in collection_ids or []:
         try:
+            if not _collection_fits_view_mode(stac, collection_id, view_mode):
+                logging.info(
+                    "Skipping collection %s: does not fit view mode %s",
+                    collection_id,
+                    view_mode,
+                )
+                continue
+
             cogs = stac.get_item_cogs(collection_id, forecast_reference_time_str)
             cog_assets = list(cogs.values())
 
@@ -195,6 +209,21 @@ def _build_forecast_layer_entries(
             continue
     return layers
 
+
+def _collection_fits_view_mode(
+    stac: STAC, collection_id: str, view_mode: str
+) -> bool:
+    """Return whether a collection's spatial extent fits the map view mode."""
+    try:
+        _temporal, spatial_extent = stac.get_collection_extents(collection_id)
+    except Exception as e:
+        logging.debug(
+            "Could not read extent for %s (%s); treating as a fit",
+            collection_id,
+            e,
+        )
+        return True
+    return bbox_fits_view_mode(spatial_extent, view_mode)
 
 def _build_leaflet_overlays(layer_entries: list[dict]) -> list:
     """Build Leaflet Overlay children from shared layer descriptors."""
@@ -310,6 +339,15 @@ def register_callbacks(app: dash.Dash):
             option = {"label": collection.id, "value": collection.id}
             options.append(option)
         return [options]
+
+    @app.callback(
+        Output("map-view-mode", "options"),
+        Input("page-load-trigger", "data"),
+        prevent_initial_call=False,
+    )
+    def update_map_view_mode_options(_):
+        """Populate Global + custom EPSG#### views from TiTiler's TMS list."""
+        return list_view_mode_options(TILER_INTERNAL_URL)
 
     @app.callback(
         [
@@ -523,6 +561,7 @@ def register_callbacks(app: dash.Dash):
         Output("map-state", "data"),
         Output("cog-results-layer", "children"),
         Output("rescale-store", "data"),
+        Output("map-view-mode", "value"),
         Input("colormap-dropdown", "value"),
         Input("forecast-init-date-picker", "value"),
         Input("variable-dropdown", "value"),
@@ -531,6 +570,7 @@ def register_callbacks(app: dash.Dash):
         Input("fixed-max", "value"),
         Input("collections-dropdown", "value"),
         Input("leadtime-slider", "value"),
+        Input("map-view-mode", "value"),
         State("rescale-store", "data"),
         State("map-state", "data"),
         prevent_initial_call=True,
@@ -544,6 +584,7 @@ def register_callbacks(app: dash.Dash):
         fixed_max,
         collection_ids: list,
         leadtime: int,
+        map_view_mode: str,
         rescale_store,
         map_state,
     ):
@@ -557,27 +598,29 @@ def register_callbacks(app: dash.Dash):
         Inputs so fixed mode updates tiles, but they are not Outputs here
         (avoids a feedback loop). A separate callback copies rescale-store into
         the min/max inputs for display in auto mode.
+
+        View-mode changes rebuild tiles for the matching projection and skip
+        collections whose extent does not fit the hemisphere. Polar modes that
+        lack a TiTiler TMS fall back to global Web Mercator.
         """
-        if not forecast_start_date or band_index is None:
-            return no_update, no_update, no_update
-
         triggered = callback_context.triggered_id
-        is_fixed = "fixed" in (fix_range or [])
+        requested_mode = map_view_mode or MapViewMode.GLOBAL_3857.value
 
-        # Ignore write-back from syncing auto rescale into the min/max inputs.
-        if triggered in ("fixed-min", "fixed-max") and not is_fixed:
-            return no_update, no_update, no_update
-
-        stac = _get_stac_client()
-        forecast_reference_time_str = date_picker_to_reference_time(forecast_start_date)
-        leadtime = 0 if leadtime is None else leadtime
-
-        engine = (map_state or {}).get("engine", MapEngine.OPENLAYERS.value)
-        mode = (map_state or {}).get("mode", MapViewMode.GLOBAL_3857.value)
+        resolved_mode, view = view_mode_and_hint(requested_mode, TILER_INTERNAL_URL)
+        mode = resolved_mode
+        # Sync the control when a custom TMS was requested but is unavailable.
+        mode_control = mode if mode != requested_mode else no_update
+        engine = resolve_engine_for_mode(
+            (map_state or {}).get("engine", MapEngine.OPENLAYERS.value),
+            mode,
+        )
         try:
             tile_matrix_set = tile_matrix_set_for_mode(mode)
         except ValueError:
             tile_matrix_set = WEB_MERCATOR_QUAD
+            mode = MapViewMode.GLOBAL_3857.value
+            view = view_mode_and_hint(mode, TILER_INTERNAL_URL)[1]
+            mode_control = mode
 
         def _publish(layer_entries, next_rescale):
             next_state = build_map_state(
@@ -585,13 +628,30 @@ def register_callbacks(app: dash.Dash):
                 engine=engine,
                 mode=mode,
                 layers=layer_entries,
+                view=view,
             )
             leaflet_children = (
                 _build_leaflet_overlays(layer_entries)
                 if engine == MapEngine.LEAFLET_LEGACY.value
                 else []
             )
-            return next_state, leaflet_children, next_rescale
+            return next_state, leaflet_children, next_rescale, mode_control
+
+        # Allow projection switches before a forecast date is chosen.
+        if not forecast_start_date or band_index is None:
+            if triggered != "map-view-mode":
+                return no_update, no_update, no_update, no_update
+            return _publish([], no_update)
+
+        is_fixed = "fixed" in (fix_range or [])
+
+        # Ignore write-back from syncing auto rescale into the min/max inputs.
+        if triggered in ("fixed-min", "fixed-max") and not is_fixed:
+            return no_update, no_update, no_update, no_update
+
+        stac = _get_stac_client()
+        forecast_reference_time_str = date_picker_to_reference_time(forecast_start_date)
+        leadtime = 0 if leadtime is None else leadtime
 
         # Colour map only: rebuild tile URLs from the stored range.
         if (
@@ -613,9 +673,10 @@ def register_callbacks(app: dash.Dash):
                 min_val,
                 max_val,
                 tile_matrix_set=tile_matrix_set,
+                view_mode=mode,
             )
             if not layer_entries:
-                return no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update
             return _publish(layer_entries, no_update)
 
         min_vals: list[float] = []
@@ -625,6 +686,14 @@ def register_callbacks(app: dash.Dash):
 
         for collection_id in collection_ids or []:
             try:
+                if not _collection_fits_view_mode(stac, collection_id, mode):
+                    logging.info(
+                        "Skipping collection %s: does not fit view mode %s",
+                        collection_id,
+                        mode,
+                    )
+                    continue
+
                 # Get COG assets for this collection and date
                 cogs = stac.get_item_cogs(
                     collection_id, forecast_reference_time_str
@@ -656,7 +725,10 @@ def register_callbacks(app: dash.Dash):
                 continue
 
         if not layer_specs or not min_vals:
-            return no_update, no_update, no_update
+            # View-mode change may leave no fitting layers; still update the CRS.
+            if triggered == "map-view-mode":
+                return _publish([], no_update)
+            return no_update, no_update, no_update, no_update
 
         # Use first min/max, or optionally min(min_vals)/max(max_vals) for all layers
         min_val = min(min_vals)
@@ -672,9 +744,12 @@ def register_callbacks(app: dash.Dash):
             min_val,
             max_val,
             tile_matrix_set=tile_matrix_set,
+            view_mode=mode,
         )
         if not layer_entries:
-            return no_update, no_update, no_update
+            if triggered == "map-view-mode":
+                return _publish([], no_update)
+            return no_update, no_update, no_update, no_update
 
         new_store = {"min": min_val, "max": max_val}
         return _publish(layer_entries, new_store)

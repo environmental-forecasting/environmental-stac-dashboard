@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .projections import MapEngine, MapViewMode
+from .projections import MapEngine, MapViewMode, view_hint_for_mode
 
 # Standard OSM raster tiles for global Web Mercator basemaps.
 OSM_XYZ_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -22,7 +22,7 @@ def initial_map_state() -> dict[str, Any]:
         "mode": MapViewMode.GLOBAL_3857.value,
         "basemap": {"type": "xyz", "url": OSM_XYZ_URL},
         "layers": [],
-        "view": None,
+        "view": view_hint_for_mode(MapViewMode.GLOBAL_3857),
         "revision": 0,
     }
 
@@ -43,7 +43,7 @@ def build_map_state(
         previous: Existing store payload, or None on first build.
         engine: Active map engine id.
         mode: Active view mode id.
-        layers: Forecast overlay descriptors (``id``, ``title``, ``tileUrl``, …).
+        layers: Forecast overlay descriptors (``id``, ``title``, ``tileUrl``, ...).
         view: Optional fit / centre hint for the client.
         basemap: Optional basemap descriptor; defaults to OSM XYZ.
 
@@ -53,6 +53,8 @@ def build_map_state(
     """
     previous = previous or initial_map_state()
     basemap = basemap or {"type": "xyz", "url": OSM_XYZ_URL}
+    if view is None:
+        view = previous.get("view")
     candidate = {
         "engine": engine,
         "mode": mode,

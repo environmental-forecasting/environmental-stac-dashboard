@@ -15,6 +15,28 @@ def test_initial_map_state_defaults_to_openlayers_global():
     assert state["mode"] == "global_3857"
     assert state["layers"] == []
     assert state["revision"] == 0
+    assert state["view"]["projection"] == "EPSG:3857"
+    assert state["view"]["showBasemap"] is True
+
+
+def test_build_map_state_bumps_revision_when_view_changes():
+    previous = initial_map_state()
+    polar_view = {
+        "projection": "EPSG:6931",
+        "showBasemap": False,
+        "fit": True,
+        "extent": [-1, -1, 1, 1],
+    }
+    changed = build_map_state(
+        previous=previous,
+        engine="openlayers",
+        mode="EPSG6931",
+        layers=[],
+        view=polar_view,
+    )
+    assert changed["revision"] == 1
+    assert changed["mode"] == "EPSG6931"
+    assert changed["view"]["projection"] == "EPSG:6931"
 
 
 def test_build_map_state_bumps_revision_only_when_content_changes():

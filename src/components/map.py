@@ -106,6 +106,18 @@ leaflet_map = html.Div(
             n_clicks=0,
             type="button",
         ),
+        html.Div(
+            dcc.RadioItems(
+                id="map-view-mode",
+                options=[
+                    {"label": "Global", "value": "global_3857"},
+                ],
+                value="global_3857",
+                inline=True,
+                className="forecast-map-view-mode",
+            ),
+            className="forecast-map-view-mode-wrap",
+        ),
         _forecast_cbar,
         # Controls for map manipulation
         html.Div(

@@ -1,28 +1,54 @@
-"""Map projection policy and TiTiler tile URL helpers."""
-
 from .asset_urls import to_tiler_asset_url
 from .projections import (
-    EPSG_6931_TMS,
-    EPSG_6932_TMS,
     WEB_MERCATOR_QUAD,
     MapEngine,
     MapViewMode,
+    bbox_fits_view_mode,
+    collection_fits_view_mode,
     epsg_code_for_mode,
+    is_custom_tms_mode,
+    label_for_view_mode,
+    list_view_mode_options,
+    normalise_view_mode,
+    proj4_for_epsg,
+    resolve_engine_for_mode,
+    resolve_view_mode,
     tile_matrix_set_for_mode,
+    view_hint_for_mode,
+    view_mode_and_hint,
 )
 from .state import build_map_state, initial_map_state
 from .tile_urls import build_cog_tile_url
+from .tms_client import (
+    clear_tile_grid_cache,
+    get_tile_grid,
+    list_custom_epsg_tms_ids,
+    tile_grid_from_tms,
+)
 
 __all__ = [
-    "EPSG_6931_TMS",
-    "EPSG_6932_TMS",
     "WEB_MERCATOR_QUAD",
     "MapEngine",
     "MapViewMode",
+    "bbox_fits_view_mode",
     "build_cog_tile_url",
     "build_map_state",
+    "clear_tile_grid_cache",
+    "collection_fits_view_mode",
     "epsg_code_for_mode",
+    "get_tile_grid",
     "initial_map_state",
+    "is_custom_tms_mode",
+    "label_for_view_mode",
+    "list_custom_epsg_tms_ids",
+    "list_view_mode_options",
+    "normalise_view_mode",
+    "proj4_for_epsg",
+    "resolve_engine_for_mode",
+    "resolve_view_mode",
+    "tile_grid_from_tms",
     "tile_matrix_set_for_mode",
     "to_tiler_asset_url",
+    "view_hint_for_mode",
+    "view_mode_and_hint",
 ]
