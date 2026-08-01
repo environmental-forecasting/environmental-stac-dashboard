@@ -216,6 +216,12 @@ def test_resolve_mode_and_engine_for_control_changes():
         "globe_cesium", "leaflet_legacy", triggered="map-view-mode"
     ) == ("globe_cesium", "cesium")
     assert resolve_mode_and_engine(
+        "global_3857", "cesium", triggered="map-view-mode"
+    ) == ("global_3857", "openlayers")
+    assert resolve_mode_and_engine(
+        "global_3857", "leaflet_legacy", triggered="map-view-mode"
+    ) == ("global_3857", "leaflet_legacy")
+    assert resolve_mode_and_engine(
         "globe_cesium", "openlayers", triggered="map-engine"
     ) == ("global_3857", "openlayers")
     assert resolve_mode_and_engine(

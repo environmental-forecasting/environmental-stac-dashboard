@@ -340,16 +340,56 @@ def label_for_engine(engine: str) -> str:
     return _ENGINE_LABELS.get(normalise_engine(engine), normalise_engine(engine))
 
 
-def list_map_engine_options() -> list[dict[str, str]]:
-    """Build RadioItems options for OpenLayers, Cesium, and legacy Leaflet."""
-    return [
-        {"label": label_for_engine(engine.value), "value": engine.value}
-        for engine in (
-            MapEngine.OPENLAYERS,
-            MapEngine.CESIUM,
-            MapEngine.LEAFLET_LEGACY,
-        )
-    ]
+def list_map_engine_options(mode: str | None = None) -> list[dict[str, object]]:
+    """
+    Build RadioItems options for OpenLayers, Cesium, and legacy Leaflet.
+
+    Polar views only allow OpenLayers. Globe only allows Cesium. Other options
+    stay listed but disabled so the choice is visible rather than snapping away.
+
+    Args:
+        mode: Active view mode id (disables incompatible engines).
+
+    Returns:
+        Option dicts for ``dcc.RadioItems`` (may include ``disabled``).
+    """
+    view_mode = normalise_view_mode(mode)
+    polar_only = is_custom_tms_mode(view_mode)
+    globe_only = view_mode == MapViewMode.GLOBE_CESIUM.value
+    options: list[dict[str, object]] = []
+    for engine in (
+        MapEngine.OPENLAYERS,
+        MapEngine.CESIUM,
+        MapEngine.LEAFLET_LEGACY,
+    ):
+        option: dict[str, object] = {
+            "label": label_for_engine(engine.value),
+            "value": engine.value,
+        }
+        if polar_only and engine is not MapEngine.OPENLAYERS:
+            option["disabled"] = True
+        elif globe_only and engine is not MapEngine.CESIUM:
+            option["disabled"] = True
+        options.append(option)
+    return options
+
+
+def map_engine_hint(mode: str | None = None) -> str:
+    """
+    Short hint shown under the map-renderer control.
+
+    Args:
+        mode: Active view mode id.
+
+    Returns:
+        Explanation when the view locks the renderer, otherwise empty.
+    """
+    view_mode = normalise_view_mode(mode)
+    if is_custom_tms_mode(view_mode):
+        return "Polar views use the flat map."
+    if view_mode == MapViewMode.GLOBE_CESIUM.value:
+        return "Globe view uses the 3D map."
+    return ""
 
 
 def resolve_engine_for_mode(engine: str, mode: str) -> str:
@@ -384,9 +424,9 @@ def resolve_mode_and_engine(
     """
     Pick a view and map engine that work together.
 
-    Choosing Globe always uses the 3D globe. Choosing a flat map while Globe
-    is selected switches back to the Global view. Arctic and Antarctic views
-    always use the flat OpenLayers map.
+    Choosing Globe always uses the 3D globe. Choosing Global (or another flat
+    view) while Cesium is active switches to OpenLayers so the flat map appears.
+    Arctic and Antarctic views always use the flat OpenLayers map.
 
     Args:
         mode: Requested view mode id.
@@ -403,6 +443,10 @@ def resolve_mode_and_engine(
         if view_mode == MapViewMode.GLOBE_CESIUM.value:
             return view_mode, MapEngine.CESIUM.value
         if is_custom_tms_mode(view_mode):
+            return view_mode, MapEngine.OPENLAYERS.value
+        # Global is the flat map. Cesium is reserved for the Globe control -
+        # keeping it here makes Global to Globe to Global look like a no-op.
+        if requested_engine == MapEngine.CESIUM.value:
             return view_mode, MapEngine.OPENLAYERS.value
         return view_mode, requested_engine
 
