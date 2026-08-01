@@ -15,9 +15,11 @@ from map.projections import (  # noqa: E402
     bbox_fits_view_mode,
     epsg_code_for_mode,
     label_for_view_mode,
+    list_map_engine_options,
     list_view_mode_options,
     normalise_view_mode,
     proj4_for_epsg,
+    resolve_mode_and_engine,
     resolve_engine_for_mode,
     resolve_view_mode,
     tile_matrix_set_for_mode,
@@ -202,11 +204,35 @@ def test_resolve_engine_for_modes():
     assert resolve_engine_for_mode("leaflet_legacy", "EPSG6931") == "openlayers"
     assert resolve_engine_for_mode("openlayers", "globe_cesium") == "cesium"
     assert resolve_engine_for_mode("leaflet_legacy", "globe_cesium") == "cesium"
-    assert resolve_engine_for_mode("cesium", "global_3857") == "openlayers"
+    assert resolve_engine_for_mode("cesium", "global_3857") == "cesium"
     assert (
         resolve_engine_for_mode("leaflet_legacy", MapViewMode.GLOBAL_3857)
         == "leaflet_legacy"
     )
+
+
+def test_resolve_mode_and_engine_for_control_changes():
+    assert resolve_mode_and_engine(
+        "globe_cesium", "leaflet_legacy", triggered="map-view-mode"
+    ) == ("globe_cesium", "cesium")
+    assert resolve_mode_and_engine(
+        "globe_cesium", "openlayers", triggered="map-engine"
+    ) == ("global_3857", "openlayers")
+    assert resolve_mode_and_engine(
+        "EPSG6931", "cesium", triggered="map-engine"
+    ) == ("EPSG6931", "openlayers")
+    assert resolve_mode_and_engine(
+        "global_3857", "cesium", triggered="map-engine"
+    ) == ("global_3857", "cesium")
+
+
+def test_list_map_engine_options():
+    options = list_map_engine_options()
+    assert options == [
+        {"label": "OpenLayers", "value": "openlayers"},
+        {"label": "Cesium", "value": "cesium"},
+        {"label": "Leaflet (legacy)", "value": "leaflet_legacy"},
+    ]
 
 
 def test_unknown_mode_raises():

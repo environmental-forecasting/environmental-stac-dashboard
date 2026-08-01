@@ -309,12 +309,55 @@ def view_mode_and_hint(
     return resolved, view_hint_for_mode(resolved, tile_grid=tile_grid)
 
 
+_ENGINE_LABELS: dict[str, str] = {
+    MapEngine.OPENLAYERS.value: "OpenLayers",
+    MapEngine.CESIUM.value: "Cesium",
+    MapEngine.LEAFLET_LEGACY.value: "Leaflet (legacy)",
+}
+
+
+def normalise_engine(engine: str | None) -> str:
+    """
+    Return a known map engine, defaulting to OpenLayers when the value is missing or unrecognised.
+
+    Args:
+        engine: Raw engine string from the UI or store.
+
+    Returns:
+        One of ``MapEngine`` values.
+    """
+    if engine in (
+        MapEngine.OPENLAYERS.value,
+        MapEngine.CESIUM.value,
+        MapEngine.LEAFLET_LEGACY.value,
+    ):
+        return engine
+    return MapEngine.OPENLAYERS.value
+
+
+def label_for_engine(engine: str) -> str:
+    """Return a short UI label for a map engine."""
+    return _ENGINE_LABELS.get(normalise_engine(engine), normalise_engine(engine))
+
+
+def list_map_engine_options() -> list[dict[str, str]]:
+    """Build RadioItems options for OpenLayers, Cesium, and legacy Leaflet."""
+    return [
+        {"label": label_for_engine(engine.value), "value": engine.value}
+        for engine in (
+            MapEngine.OPENLAYERS,
+            MapEngine.CESIUM,
+            MapEngine.LEAFLET_LEGACY,
+        )
+    ]
+
+
 def resolve_engine_for_mode(engine: str, mode: str) -> str:
     """
     Return an engine that can render the requested view mode.
 
-    Globe: Cesium (default), OpenLayers (custom polar grids), or global Web Mercator.
-    Leaflet stays only for flat global Web Mercator.
+    Globe always uses Cesium. Custom polar grids need OpenLayers. On Global,
+    the requested engine is honoured (OpenLayers, Cesium, or Leaflet).
 
     Args:
         engine: Requested map engine id.
@@ -324,13 +367,60 @@ def resolve_engine_for_mode(engine: str, mode: str) -> str:
         Engine id safe for ``mode`` (may equal ``engine``).
     """
     view_mode = normalise_view_mode(mode)
+    requested = normalise_engine(engine)
     if view_mode == MapViewMode.GLOBE_CESIUM.value:
         return MapEngine.CESIUM.value
     if is_custom_tms_mode(view_mode):
         return MapEngine.OPENLAYERS.value
-    if engine == MapEngine.CESIUM.value:
-        return MapEngine.OPENLAYERS.value
-    return engine
+    return requested
+
+
+def resolve_mode_and_engine(
+    mode: str | None,
+    engine: str | None,
+    *,
+    triggered: str | None = None,
+) -> tuple[str, str]:
+    """
+    Pick a view and map engine that work together.
+
+    Choosing Globe always uses the 3D globe. Choosing a flat map while Globe
+    is selected switches back to the Global view. Arctic and Antarctic views
+    always use the flat OpenLayers map.
+
+    Args:
+        mode: Requested view mode id.
+        engine: Requested map engine id.
+        triggered: Dash ``callback_context.triggered_id`` when known.
+
+    Returns:
+        ``(resolved_mode, resolved_engine)`` before TiTiler TMS fallback.
+    """
+    view_mode = normalise_view_mode(mode)
+    requested_engine = normalise_engine(engine)
+
+    if triggered == "map-view-mode":
+        if view_mode == MapViewMode.GLOBE_CESIUM.value:
+            return view_mode, MapEngine.CESIUM.value
+        if is_custom_tms_mode(view_mode):
+            return view_mode, MapEngine.OPENLAYERS.value
+        return view_mode, requested_engine
+
+    if triggered == "map-engine":
+        if is_custom_tms_mode(view_mode):
+            return view_mode, MapEngine.OPENLAYERS.value
+        if (
+            view_mode == MapViewMode.GLOBE_CESIUM.value
+            and requested_engine != MapEngine.CESIUM.value
+        ):
+            return MapViewMode.GLOBAL_3857.value, requested_engine
+        return view_mode, requested_engine
+
+    if is_custom_tms_mode(view_mode):
+        return view_mode, MapEngine.OPENLAYERS.value
+    if view_mode == MapViewMode.GLOBE_CESIUM.value:
+        return view_mode, MapEngine.CESIUM.value
+    return view_mode, requested_engine
 
 
 def collection_fits_view_mode(collection, mode: str) -> bool:

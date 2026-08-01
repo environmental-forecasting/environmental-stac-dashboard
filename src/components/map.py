@@ -111,16 +111,29 @@ leaflet_map = html.Div(
             type="button",
         ),
         html.Div(
-            dcc.RadioItems(
-                id="map-view-mode",
-                options=[
-                    {"label": "Global", "value": "global_3857"},
-                ],
-                value="global_3857",
-                inline=True,
-                className="forecast-map-view-mode",
-            ),
-            className="forecast-map-view-mode-wrap",
+            [
+                dcc.RadioItems(
+                    id="map-view-mode",
+                    options=[
+                        {"label": "Global", "value": "global_3857"},
+                    ],
+                    value="global_3857",
+                    inline=True,
+                    className="forecast-map-view-mode",
+                ),
+                dcc.RadioItems(
+                    id="map-engine",
+                    options=[
+                        {"label": "OpenLayers", "value": "openlayers"},
+                        {"label": "Cesium", "value": "cesium"},
+                        {"label": "Leaflet (legacy)", "value": "leaflet_legacy"},
+                    ],
+                    value="openlayers",
+                    inline=True,
+                    className="forecast-map-engine",
+                ),
+            ],
+            className="forecast-map-mode-controls",
         ),
         _forecast_cbar,
         # Controls for map manipulation

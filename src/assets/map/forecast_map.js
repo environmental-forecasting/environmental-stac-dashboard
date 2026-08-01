@@ -24,6 +24,15 @@
     var engine = state.engine || "openlayers";
     var leafletHost = document.getElementById("forecast-map-leaflet");
     var globeHost = document.getElementById("forecast-map-globe");
+    var olHost = document.getElementById("forecast-map-ol");
+
+    if (olHost) {
+      if (engine === "openlayers") {
+        olHost.classList.remove("forecast-map-host--hidden");
+      } else {
+        olHost.classList.add("forecast-map-host--hidden");
+      }
+    }
 
     if (leafletHost) {
       if (engine === "leaflet_legacy") {

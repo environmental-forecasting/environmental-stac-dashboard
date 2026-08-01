@@ -9,6 +9,7 @@
   var forecastUrlsById = {};
   var viewer = null;
   var basemapLayer = null;
+  var basemapUrl = null;
 
   function getHost() {
     return document.getElementById(HOST_ID);
@@ -45,7 +46,7 @@
       timeline: false,
       baseLayerPicker: false,
       geocoder: false,
-      homeButton: true,
+      homeButton: false,
       sceneModePicker: false,
       navigationHelpButton: false,
       fullscreenButton: true,
@@ -58,6 +59,7 @@
     });
 
     basemapLayer = viewer.imageryLayers.get(0);
+    basemapUrl = OSM_URL;
     viewer.scene.globe.enableLighting = false;
     viewer.scene.fog.enabled = false;
     if (viewer.scene.skyAtmosphere) {
@@ -80,9 +82,14 @@
     if (!basemap || !basemap.url || showBasemap === false) {
       return;
     }
+    // Avoid tearing down OSM on every map-state revision.
+    if (basemap.url === basemapUrl) {
+      return;
+    }
     var index = viewer.imageryLayers.indexOf(basemapLayer);
     viewer.imageryLayers.remove(basemapLayer, false);
     basemapLayer = osmImageryLayer(basemap.url);
+    basemapUrl = basemap.url;
     if (index >= 0) {
       viewer.imageryLayers.add(basemapLayer, index);
     } else {
