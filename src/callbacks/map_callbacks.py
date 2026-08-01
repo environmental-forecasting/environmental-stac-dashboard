@@ -26,7 +26,15 @@ from stac.timefmt import (
     to_calendar_day,
 )
 
-from map import WEB_MERCATOR_QUAD, build_cog_tile_url, to_tiler_asset_url
+from map import (
+    WEB_MERCATOR_QUAD,
+    MapEngine,
+    MapViewMode,
+    build_cog_tile_url,
+    build_map_state,
+    tile_matrix_set_for_mode,
+    to_tiler_asset_url,
+)
 
 from .utils import (
     convert_colormap_to_colorscale,
@@ -119,7 +127,7 @@ def _resolve_band_minmax(
     return float(band_stats.get("min", 0)), float(band_stats.get("max", 1))
 
 
-def _build_tile_layers(
+def _build_forecast_layer_entries(
     stac: STAC,
     collection_ids: list,
     forecast_reference_time_str: str,
@@ -128,9 +136,27 @@ def _build_tile_layers(
     colormap: str,
     min_val: float,
     max_val: float,
-) -> list:
-    """Build Leaflet overlays for each selected collection at the given leadtime."""
-    tile_layers = []
+    tile_matrix_set: str = WEB_MERCATOR_QUAD,
+) -> list[dict]:
+    """
+    Build shared forecast layer descriptors for map-state and Leaflet.
+
+    Args:
+        stac: Cached STAC client.
+        collection_ids: Selected collection ids.
+        forecast_reference_time_str: Forecast init as a STAC datetime string.
+        leadtime: Leadtime index into COG assets.
+        band_index: One-based band index for TiTiler.
+        colormap: rio-tiler colormap name.
+        min_val: Display rescale minimum.
+        max_val: Display rescale maximum.
+        tile_matrix_set: TiTiler tile matrix set id.
+
+    Returns:
+        List of layer dicts with ``id``, ``title``, ``tileUrl``, ``opacity``,
+        and ``visible``.
+    """
+    layers: list[dict] = []
     for collection_id in collection_ids or []:
         try:
             cogs = stac.get_item_cogs(collection_id, forecast_reference_time_str)
@@ -143,28 +169,75 @@ def _build_tile_layers(
                 continue
 
             cog_asset = cog_assets[leadtime]
-            tile_url = (
-                get_tile_url(cog_asset.href)
-                + f"&colormap_name={colormap}&rescale={min_val},{max_val}&bidx={band_index}"
+            tile_url = build_cog_tile_url(
+                cog_asset.href,
+                tiler_url=TILER_URL,
+                file_server_url=FILE_SERVER_URL,
+                file_server_internal_url=FILE_SERVER_INTERNAL_URL,
+                tile_matrix_set=tile_matrix_set,
+                colormap=colormap,
+                rescale=(min_val, max_val),
+                band_index=band_index,
             )
             logging.debug("tile_url: %s", tile_url)
 
-            tile_layers.append(
-                dl.Overlay(
-                    dl.TileLayer(
-                        id={"type": "cog-collections", "index": 0},
-                        url=tile_url,
-                        zIndex=100,
-                        opacity=1,
-                    ),
-                    name=collection_id,
-                    checked=True,
-                )
+            layers.append(
+                {
+                    "id": collection_id,
+                    "title": collection_id,
+                    "tileUrl": tile_url,
+                    "opacity": 1,
+                    "visible": True,
+                }
             )
         except Exception as e:
             logging.error("Error processing collection %s: %s", collection_id, e)
             continue
+    return layers
+
+
+def _build_leaflet_overlays(layer_entries: list[dict]) -> list:
+    """Build Leaflet Overlay children from shared layer descriptors."""
+    tile_layers = []
+    for index, layer in enumerate(layer_entries):
+        tile_layers.append(
+            dl.Overlay(
+                dl.TileLayer(
+                    id={"type": "cog-collections", "index": index},
+                    url=layer["tileUrl"],
+                    zIndex=100,
+                    opacity=layer.get("opacity", 1),
+                ),
+                name=layer.get("title") or layer["id"],
+                checked=layer.get("visible", True),
+            )
+        )
     return tile_layers
+
+
+def _build_tile_layers(
+    stac: STAC,
+    collection_ids: list,
+    forecast_reference_time_str: str,
+    leadtime: int,
+    band_index: int,
+    colormap: str,
+    min_val: float,
+    max_val: float,
+) -> list:
+    """Build Leaflet overlays for each selected collection at the given leadtime."""
+    # Kept as a thin wrapper for call sites that still expect Overlay children.
+    entries = _build_forecast_layer_entries(
+        stac,
+        collection_ids,
+        forecast_reference_time_str,
+        leadtime,
+        band_index,
+        colormap,
+        min_val,
+        max_val,
+    )
+    return _build_leaflet_overlays(entries)
 
 
 # Callback function that will update the output container based on input
@@ -202,6 +275,20 @@ def register_callbacks(app: dash.Dash):
         """,
         Output("window-width", "data"),
         Input("page-load-trigger", "data"),
+    )
+
+    # Push map-state into the OpenLayers / Leaflet bridge.
+    app.clientside_callback(
+        """
+        function(mapState) {
+            if (window.ForecastMap && typeof window.ForecastMap.applyState === "function") {
+                window.ForecastMap.applyState(mapState);
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("map-bridge-tick", "data"),
+        Input("map-state", "data"),
     )
 
     @app.callback(
@@ -433,6 +520,7 @@ def register_callbacks(app: dash.Dash):
         return slider_style, current_leadtime, leadtime_min, leadtime_max, marks
 
     @app.callback(
+        Output("map-state", "data"),
         Output("cog-results-layer", "children"),
         Output("rescale-store", "data"),
         Input("colormap-dropdown", "value"),
@@ -444,6 +532,7 @@ def register_callbacks(app: dash.Dash):
         Input("collections-dropdown", "value"),
         Input("leadtime-slider", "value"),
         State("rescale-store", "data"),
+        State("map-state", "data"),
         prevent_initial_call=True,
     )
     def update_cog_layer(
@@ -456,29 +545,53 @@ def register_callbacks(app: dash.Dash):
         collection_ids: list,
         leadtime: int,
         rescale_store,
+        map_state,
     ):
         """
         Update map COG layers from the cached forecast Item.
 
-        Auto mode prefers band STATISTICS_* on the Item; TiTiler statistics are
-        only a fallback. Colour map changes reuse rescale-store. fixed-min/max
-        are Inputs so fixed mode updates tiles, but they are not Outputs here
+        Writes shared ``map-state`` for OpenLayers (default). When the engine is
+        ``leaflet_legacy``, also builds Leaflet Overlay children. Auto mode
+        prefers band STATISTICS_* on the Item; TiTiler statistics are only a
+        fallback. Colour map changes reuse rescale-store. fixed-min/max are
+        Inputs so fixed mode updates tiles, but they are not Outputs here
         (avoids a feedback loop). A separate callback copies rescale-store into
         the min/max inputs for display in auto mode.
         """
         if not forecast_start_date or band_index is None:
-            return no_update, no_update
+            return no_update, no_update, no_update
 
         triggered = callback_context.triggered_id
         is_fixed = "fixed" in (fix_range or [])
 
         # Ignore write-back from syncing auto rescale into the min/max inputs.
         if triggered in ("fixed-min", "fixed-max") and not is_fixed:
-            return no_update, no_update
+            return no_update, no_update, no_update
 
         stac = _get_stac_client()
         forecast_reference_time_str = date_picker_to_reference_time(forecast_start_date)
         leadtime = 0 if leadtime is None else leadtime
+
+        engine = (map_state or {}).get("engine", MapEngine.OPENLAYERS.value)
+        mode = (map_state or {}).get("mode", MapViewMode.GLOBAL_3857.value)
+        try:
+            tile_matrix_set = tile_matrix_set_for_mode(mode)
+        except ValueError:
+            tile_matrix_set = WEB_MERCATOR_QUAD
+
+        def _publish(layer_entries, next_rescale):
+            next_state = build_map_state(
+                previous=map_state,
+                engine=engine,
+                mode=mode,
+                layers=layer_entries,
+            )
+            leaflet_children = (
+                _build_leaflet_overlays(layer_entries)
+                if engine == MapEngine.LEAFLET_LEGACY.value
+                else []
+            )
+            return next_state, leaflet_children, next_rescale
 
         # Colour map only: rebuild tile URLs from the stored range.
         if (
@@ -490,7 +603,7 @@ def register_callbacks(app: dash.Dash):
         ):
             min_val = rescale_store["min"]
             max_val = rescale_store["max"]
-            tile_layers = _build_tile_layers(
+            layer_entries = _build_forecast_layer_entries(
                 stac,
                 collection_ids,
                 forecast_reference_time_str,
@@ -499,10 +612,11 @@ def register_callbacks(app: dash.Dash):
                 colormap,
                 min_val,
                 max_val,
+                tile_matrix_set=tile_matrix_set,
             )
-            if not tile_layers:
-                return no_update, no_update
-            return tile_layers, no_update
+            if not layer_entries:
+                return no_update, no_update, no_update
+            return _publish(layer_entries, no_update)
 
         min_vals: list[float] = []
         max_vals: list[float] = []
@@ -542,13 +656,13 @@ def register_callbacks(app: dash.Dash):
                 continue
 
         if not layer_specs or not min_vals:
-            return no_update, no_update
+            return no_update, no_update, no_update
 
         # Use first min/max, or optionally min(min_vals)/max(max_vals) for all layers
         min_val = min(min_vals)
         max_val = max(max_vals)
 
-        tile_layers = _build_tile_layers(
+        layer_entries = _build_forecast_layer_entries(
             stac,
             [spec[0] for spec in layer_specs],
             forecast_reference_time_str,
@@ -557,12 +671,13 @@ def register_callbacks(app: dash.Dash):
             colormap,
             min_val,
             max_val,
+            tile_matrix_set=tile_matrix_set,
         )
-        if not tile_layers:
-            return no_update, no_update
+        if not layer_entries:
+            return no_update, no_update, no_update
 
         new_store = {"min": min_val, "max": max_val}
-        return tile_layers, new_store
+        return _publish(layer_entries, new_store)
 
     @app.callback(
         Output("fixed-min", "value"),
@@ -585,6 +700,9 @@ def register_callbacks(app: dash.Dash):
         Output("cbar", "colorscale"),
         Output("cbar", "min"),
         Output("cbar", "max"),
+        Output("forecast-cbar-ramp", "style"),
+        Output("forecast-cbar-min", "children"),
+        Output("forecast-cbar-max", "children"),
         Input("cbar", "colorscale"),
         Input("colormap-dropdown", "value"),
         Input("fixed-min", "value"),
@@ -599,7 +717,16 @@ def register_callbacks(app: dash.Dash):
             isinstance(min_val, (int, float)) and isinstance(max_val, (int, float))
         ):
             min_val, max_val = 0, 1
-        return colorscale, min_val, max_val
+        # HTML colourbar for OpenLayers (Leaflet still uses dl.Colorbar).
+        ramp_colors = colorscale if isinstance(colorscale, list) and colorscale else []
+        ramp_style = {
+            "background": (
+                f"linear-gradient(to top, {', '.join(ramp_colors)})"
+                if ramp_colors
+                else None
+            ),
+        }
+        return colorscale, min_val, max_val, ramp_style, str(min_val), str(max_val)
 
     @app.callback(
         Output("controls", "style"),

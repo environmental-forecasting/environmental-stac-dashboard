@@ -1,6 +1,7 @@
 import dash_leaflet as dl
 import dash_mantine_components as dmc
 from dash import dcc, html
+from map.state import initial_map_state
 from rio_tiler.colormap import ColorMaps
 
 # Default settings
@@ -23,44 +24,89 @@ blues_r = [
 ]
 blues_r.reverse()
 
+# Shared HTML colourbar (visible for OpenLayers; Leaflet keeps dl.Colorbar too).
+_forecast_cbar = html.Div(
+    id="forecast-cbar",
+    className="forecast-cbar",
+    children=[
+        html.Div(id="forecast-cbar-max", className="forecast-cbar__label", children="1"),
+        html.Div(
+            id="forecast-cbar-ramp",
+            className="forecast-cbar__ramp",
+            style={
+                "background": f"linear-gradient(to top, {', '.join(blues_r)})",
+            },
+        ),
+        html.Div(id="forecast-cbar-min", className="forecast-cbar__label", children="0"),
+    ],
+)
+
+# Leaflet map (hidden while OpenLayers is the default engine).
+_leaflet_map = dl.Map(
+    [
+        dl.TileLayer(
+            id="map-base-layer",
+            attribution=("© OpenStreetMap contributors"),
+            zIndex=0,
+        ),
+        dl.LayersControl([], id="cog-results-layer"),
+        dl.Colorbar(
+            id="cbar",
+            width=30,
+            height=200,
+            style={
+                "opacity": "1.0",
+                "backgroundColor": "rgba(255, 255, 255, 0.8)",
+                "padding": "10px",
+                "border-radius": "10px",
+            },
+            position="topleft",
+            tooltip=True,
+            colorscale=blues_r,
+        ),
+        dl.ScaleControl(position="bottomright"),
+        dl.FullScreenControl(position="bottomleft"),
+        # Settings control moved to a shared HTML button (see controls-btn below)
+        # so it remains available when the Leaflet host is hidden.
+    ],
+    crs="EPSG3857",
+    attributionControl=True,
+    style={"width": "inherit", "height": "inherit"},
+    center=DEFAULT_CENTER,
+    zoom=DEFAULT_ZOOM,
+    zoomDelta=0.1,
+    zoomSnap=0.1,
+    id="map",
+)
+
 leaflet_map = html.Div(
     # style={'width': 'inherit', 'height': 'inherit'},
+    className="forecast-map-root",
     style={"width": "inherit", "height": "inherit", "position": "relative"},
     children=[
-        dl.Map(
-            [
-                dl.TileLayer(
-                    id="map-base-layer",
-                    attribution=("© OpenStreetMap contributors"),
-                    zIndex=0,
+        html.Div(
+            className="forecast-map-hosts",
+            children=[
+                html.Div(
+                    id="forecast-map-ol",
+                    className="forecast-map-host",
                 ),
-                dl.LayersControl([], id="cog-results-layer"),
-                dl.Colorbar(
-                    id="cbar",
-                    width=30,
-                    height=200,
-                    style={"opacity": "1.0",
-                        "backgroundColor": "rgba(255, 255, 255, 0.8)",
-                        "padding": "10px",
-                        "border-radius": "10px",
-                        },
-                    position="topleft",
-                    tooltip=True,
-                    colorscale=blues_r,
+                html.Div(
+                    id="forecast-map-leaflet",
+                    className="forecast-map-host forecast-map-host--hidden",
+                    children=[_leaflet_map],
                 ),
-                dl.ScaleControl(position="bottomright"),
-                dl.FullScreenControl(position="bottomleft"),
-                dl.EasyButton(icon="ti ti-settings", title="controls", id="controls-btn"),
             ],
-            crs="EPSG3857",
-            attributionControl=True,
-            style={"width": "inherit", "height": "inherit"},
-            center=DEFAULT_CENTER,
-            zoom=DEFAULT_ZOOM,
-            zoomDelta=0.1,
-            zoomSnap=0.1,
-            id="map",
         ),
+        html.Button(
+            "⚙",
+            id="controls-btn",
+            className="forecast-map-settings-btn",
+            title="controls",
+            n_clicks=0,
+            type="button",
+        ),
+        _forecast_cbar,
         # Controls for map manipulation
         html.Div(
             [
@@ -164,5 +210,7 @@ leaflet_map = html.Div(
         dcc.Store(id="forecast-dates-store", data=None),
         dcc.Store(id="fix-colorbar-range", data=None),
         dcc.Store(id="rescale-store", data=None),
+        dcc.Store(id="map-state", data=initial_map_state()),
+        dcc.Store(id="map-bridge-tick", data=0),
     ],
 )

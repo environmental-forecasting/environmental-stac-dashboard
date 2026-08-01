@@ -1,0 +1,86 @@
+/* Forecast map hosts: OpenLayers default, Leaflet. */
+
+.forecast-map-root {
+  width: inherit;
+  height: inherit;
+  position: relative;
+}
+
+.forecast-map-hosts {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.forecast-map-host {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.forecast-map-host--hidden {
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+#forecast-map-ol {
+  z-index: 1;
+}
+
+#forecast-map-leaflet {
+  z-index: 1;
+}
+
+#forecast-map-leaflet:not(.forecast-map-host--hidden) {
+  z-index: 2;
+}
+
+.forecast-map-settings-btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1000;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.forecast-map-settings-btn:hover {
+  background: #fff;
+}
+
+.forecast-cbar {
+  position: absolute;
+  top: 60px;
+  left: 12px;
+  z-index: 1000;
+  width: 30px;
+  height: 200px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  box-sizing: content-box;
+}
+
+.forecast-cbar__ramp {
+  flex: 1;
+  width: 100%;
+  border-radius: 2px;
+}
+
+.forecast-cbar__label {
+  font-size: 11px;
+  color: #333;
+  text-align: center;
+}

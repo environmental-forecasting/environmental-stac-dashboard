@@ -4,14 +4,29 @@ import dash_mantine_components as dmc
 from layouts import index
 from callbacks import map_callbacks
 
+BAS_STYLE_KIT_VERSION = "0.7.3"
+TABLER_ICONS_VERSION = "3.34.1"
+OPENLAYERS_VERSION = "10.10.0"
+PROJ4_VERSION = "2.21.0"
+
 stylesheets = [
-    "https://cdn.web.bas.ac.uk/bas-style-kit/0.7.3/css/bas-style-kit.min.css",
-    "https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.34.1/tabler-icons.min.css",
+    f"https://cdn.web.bas.ac.uk/bas-style-kit/{BAS_STYLE_KIT_VERSION}/css/bas-style-kit.min.css",
+    f"https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/{TABLER_ICONS_VERSION}/tabler-icons.min.css",
     dbc.themes.BOOTSTRAP,
     dmc.styles.ALL,
+    f"https://cdn.jsdelivr.net/npm/ol@{OPENLAYERS_VERSION}/ol.css",
 ]
 
-app = dash.Dash(__name__, external_stylesheets=[*stylesheets])
+external_scripts = [
+    f"https://cdn.jsdelivr.net/npm/proj4@{PROJ4_VERSION}/dist/proj4.js",
+    f"https://cdn.jsdelivr.net/npm/ol@{OPENLAYERS_VERSION}/dist/ol.js",
+]
+
+app = dash.Dash(
+    __name__,
+    external_stylesheets=[*stylesheets],
+    external_scripts=external_scripts,
+)
 app.title = "IceNet Visualiser"
 
 # Register the callbacks
