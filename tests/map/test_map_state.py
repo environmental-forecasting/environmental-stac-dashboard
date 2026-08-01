@@ -23,7 +23,7 @@ def test_build_map_state_bumps_revision_when_view_changes():
     previous = initial_map_state()
     polar_view = {
         "projection": "EPSG:6931",
-        "showBasemap": False,
+        "showBasemap": True,
         "fit": True,
         "extent": [-1, -1, 1, 1],
     }

@@ -136,7 +136,7 @@ def test_view_hint_for_custom_mode_requires_tile_grid():
     grid = tile_grid_from_tms(_sample_polar_tms())
     hint = view_hint_for_mode("EPSG6931", tile_grid=grid)
     assert hint["projection"] == "EPSG:6931"
-    assert hint["showBasemap"] is False
+    assert hint["showBasemap"] is True
     assert hint["fit"] is True
     assert hint["extent"] == grid["extent"]
     assert hint["proj4"]

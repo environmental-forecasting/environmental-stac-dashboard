@@ -146,10 +146,12 @@
     if (!basemap || !basemap.url || showBasemap === false) {
       return;
     }
-    // OSM is Web Mercator only; keep default XYZ grid.
+    // OSM XYZ is always EPSG:3857; OL reprojects into polar/custom views.
     basemapLayer.setSource(
       new ol.source.XYZ({
         url: basemap.url,
+        projection: "EPSG:3857",
+        crossOrigin: "anonymous",
         attributions: "© OpenStreetMap contributors",
       })
     );

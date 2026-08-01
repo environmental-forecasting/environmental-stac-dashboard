@@ -260,7 +260,8 @@ def view_hint_for_mode(
             "extent": list(tile_grid["extent"]),
             "origin": list(tile_grid["origin"]),
             "resolutions": list(tile_grid["resolutions"]),
-            "showBasemap": False,
+            # OSM stays Web Mercator; OpenLayers reprojects it into this view.
+            "showBasemap": True,
             "fit": True,
         }
     return {
