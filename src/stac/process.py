@@ -112,16 +112,105 @@ class STAC:
 
     def list_forecast_inits(self, collection_id: str) -> list[dict[str, Any]]:
         """
-        List forecast initialisation times for a collection in one slim search.
+        List forecast initialisation times for a collection.
 
-        Uses the Item Search Fields extension to omit geometry and assets.
-        Each entry includes init datetime plus leadtime metadata when present,
-        so callers need not fetch each Item again for the date picker.
+        Prefers Collection summaries (``forecast:reference_time`` plus a single
+        shared ``forecast:leadtime_length``) so the date picker needs only
+        ``GET /collections/{id}``. Falls back to a slim Item Search when
+        summaries are missing or leadtime lengths are not uniform.
 
         Returns:
             Sorted list of dicts with keys:
             ``datetime``, ``reference_time``, ``end_time``, ``leadtime_length``.
         """
+        from_summaries = self._list_forecast_inits_from_summaries(collection_id)
+        if from_summaries is not None:
+            return from_summaries
+        return self._list_forecast_inits_from_search(collection_id)
+
+    def _list_forecast_inits_from_summaries(
+        self, collection_id: str
+    ) -> list[dict[str, Any]] | None:
+        """
+        Build init rows from Collection summaries, or None to fall back.
+
+        Requires ``forecast:reference_time`` and exactly one
+        ``forecast:leadtime_length`` value so each init can get an end date
+        without listing Items.
+        """
+        try:
+            collection = self._catalog.get_collection(collection_id)
+        except Exception as e:
+            logger.warning(
+                "Could not load collection %s for summaries: %s", collection_id, e
+            )
+            return None
+
+        summaries = collection.summaries
+        if summaries is None or summaries.is_empty():
+            return None
+
+        summary_dict = summaries.to_dict()
+        reference_times = summary_dict.get("forecast:reference_time") or []
+        if not isinstance(reference_times, list) or not reference_times:
+            return None
+
+        leadtime_values = summary_dict.get("forecast:leadtime_length") or []
+        if not isinstance(leadtime_values, list):
+            leadtime_values = [leadtime_values]
+
+        leadtime_lengths: list[int] = []
+        for value in leadtime_values:
+            try:
+                leadtime_lengths.append(int(value))
+            except (TypeError, ValueError):
+                continue
+
+        # Multiple different leadtime lengths cannot be mapped per init from
+        # summaries alone; fall back to Item Search.
+        if len(set(leadtime_lengths)) != 1:
+            logger.debug(
+                "Collection %s summaries lack a single leadtime length; "
+                "falling back to Item Search",
+                collection_id,
+            )
+            return None
+
+        leadtime_length = leadtime_lengths[0]
+        inits: list[dict[str, Any]] = []
+        for reference_time in reference_times:
+            try:
+                item_dt = parse_stac_datetime(reference_time)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Skipping invalid forecast:reference_time in summaries: %s",
+                    reference_time,
+                )
+                continue
+            inits.append(
+                {
+                    "datetime": item_dt,
+                    "reference_time": reference_time,
+                    "end_time": None,
+                    "leadtime_length": leadtime_length,
+                }
+            )
+
+        if not inits:
+            return None
+
+        inits.sort(key=lambda row: row["datetime"])
+        logger.debug(
+            "Loaded %s forecast inits for %s from Collection summaries",
+            len(inits),
+            collection_id,
+        )
+        return inits
+
+    def _list_forecast_inits_from_search(
+        self, collection_id: str
+    ) -> list[dict[str, Any]]:
+        """List forecast inits via a slim Item Search (Fields extension)."""
         search = self._catalog.search(
             collections=[collection_id],
             fields=_FORECAST_INIT_FIELDS,
