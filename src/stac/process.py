@@ -2,11 +2,12 @@ import logging
 from datetime import datetime as dt
 from typing import Any, Iterable
 
-from dateutil import parser
 from pystac import Asset, Collection, Item, MediaType
 from pystac_client import Client, ItemSearch
 from pystac_client.stac_api_io import StacApiIO
 from urllib3 import Retry
+
+from .timefmt import parse_stac_datetime, to_stac_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ class STAC:
 
             reference_time = props.get("forecast:reference_time")
             if not reference_time and item_dt is not None:
-                reference_time = item_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                reference_time = to_stac_datetime(item_dt)
 
             leadtime_length = props.get("forecast:leadtime_length")
             if leadtime_length is not None:
@@ -167,10 +168,8 @@ class STAC:
         ):
             if not value:
                 continue
-            if isinstance(value, dt):
-                return value
             try:
-                return parser.isoparse(value)
+                return parse_stac_datetime(value)
             except (TypeError, ValueError):
                 continue
         return None
@@ -237,7 +236,7 @@ class STAC:
             item_props["forecast:end_time"],
         )
         temporal_extent = [
-            parser.isoparse(iso_string) for iso_string in temporal_extent
+            parse_stac_datetime(iso_string) for iso_string in temporal_extent
         ]
         # Convert to match datetime like `get_collection_extents`.
         spatial_extent = item.bbox

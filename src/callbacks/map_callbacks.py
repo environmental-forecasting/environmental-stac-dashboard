@@ -16,10 +16,15 @@ from config import (
     TILER_URL,
 )
 from dash import Input, Output, State, callback_context, no_update
-from dateutil import parser as date_parser
 from pystac import Asset
-from pystac.utils import str_to_datetime
 from stac.process import STAC
+from stac.timefmt import (
+    date_picker_to_reference_time,
+    format_slider_label,
+    parse_calendar_day,
+    parse_stac_datetime,
+    to_calendar_day,
+)
 
 from .utils import (
     convert_colormap_to_colorscale,
@@ -77,25 +82,19 @@ def get_tile_url(cog_path: str):
     # return f"{TILER_URL}/cog/tiles/EPSG6931/{{z}}/{{x}}/{{y}}?url={cog_path}"
 
 
-def _forecast_reference_time(selected_date: str) -> str:
-    """Convert a date-picker value (YYYY-MM-DD) to a forecast:reference_time string."""
-    # Convert to ISO 8601 format which is what the "forecast:reference_time" property is stored as
-    return datetime.strptime(selected_date, "%Y-%m-%d").isoformat() + "Z"
-
-
 def _end_calendar_day_from_init(row: dict) -> str | None:
     """Calendar end day for the leadtime slider, from a list_forecast_inits row."""
     end_time = row.get("end_time")
     if end_time:
         try:
-            return date_parser.isoparse(end_time).date().isoformat()
+            return to_calendar_day(parse_stac_datetime(end_time))
         except (TypeError, ValueError):
             pass
 
     leadtime_length = row.get("leadtime_length")
     init_dt = row.get("datetime")
     if leadtime_length is not None and init_dt is not None:
-        return (init_dt + timedelta(days=int(leadtime_length))).date().isoformat()
+        return to_calendar_day(init_dt + timedelta(days=int(leadtime_length)))
     return None
 
 
@@ -190,7 +189,10 @@ def register_callbacks(app: dash.Dash):
     @app.callback(
         [Output("collections-dropdown", "options")],
         [Input("page-load-trigger", "data")],
-        prevent_initial_call=True,
+        # Must run on load: page-load-trigger is already True in the layout, so
+        # prevent_initial_call=True would skip the only invocation and leave
+        # the dropdown empty.
+        prevent_initial_call=False,
     )
     def update_collections(_):
         stac = _get_stac_client()
@@ -245,7 +247,7 @@ def register_callbacks(app: dash.Dash):
                         continue
 
                     all_forecast_dates.add(init_dt)
-                    day_key = init_dt.strftime("%Y-%m-%d")
+                    day_key = to_calendar_day(init_dt)
                     # Keep the latest end date when several collections share a day
                     previous = forecast_dates_dict.get(day_key)
                     if previous is None or end_day > previous:
@@ -261,8 +263,8 @@ def register_callbacks(app: dash.Dash):
 
         sorted_dates = sorted(all_forecast_dates)
         # Date picker and store keys use calendar days (YYYY-MM-DD) only.
-        min_date = sorted_dates[0].date().isoformat()
-        max_date = sorted_dates[-1].date().isoformat()
+        min_date = to_calendar_day(sorted_dates[0])
+        max_date = to_calendar_day(sorted_dates[-1])
         initial_visible_month = max_date
 
         logging.debug(
@@ -273,7 +275,7 @@ def register_callbacks(app: dash.Dash):
         date_range = pd.date_range(min_date, max_date)
         available_dates = {d.date() for d in sorted_dates}
         disabled_dates = [
-            d.date().isoformat() for d in date_range if d.date() not in available_dates
+            to_calendar_day(d) for d in date_range if d.date() not in available_dates
         ]
 
         return [
@@ -301,7 +303,7 @@ def register_callbacks(app: dash.Dash):
             return []
 
         stac = _get_stac_client()
-        forecast_reference_time_str = _forecast_reference_time(selected_date)
+        forecast_reference_time_str = date_picker_to_reference_time(selected_date)
         combined_vars: dict[str, int] = {}
 
         for collection_id in collection_ids:
@@ -368,8 +370,8 @@ def register_callbacks(app: dash.Dash):
         ):
             return no_update
 
-        forecast_start_date = datetime.strptime(selected_date, "%Y-%m-%d")
-        forecast_end_date = str_to_datetime(forecast_dates[selected_date])
+        forecast_start_date = parse_calendar_day(selected_date)
+        forecast_end_date = parse_calendar_day(forecast_dates[selected_date])
 
         logging.info("forecast start date: %s", forecast_start_date)
         logging.info("forecast end date: %s", forecast_end_date)
@@ -383,7 +385,7 @@ def register_callbacks(app: dash.Dash):
 
         # # For dcc.Slider
         # marks = {
-        #     idx : (forecast_start_date + timedelta(days=idx)).strftime("%Y-%m-%d") for idx in leadtimes
+        #     idx : to_calendar_day(forecast_start_date + timedelta(days=idx)) for idx in leadtimes
         # }
 
         # # For dash mantine slider
@@ -394,12 +396,16 @@ def register_callbacks(app: dash.Dash):
         marks = [
             {
                 "value": idx,
-                "label": (forecast_start_date + timedelta(days=idx)).strftime("%d %b %y"),
+                "label": format_slider_label(
+                    forecast_start_date + timedelta(days=idx)
+                ),
             }
             for idx in leadtimes[::step]
         ]
 
-        current_label = (forecast_start_date + timedelta(days=leadtime)).strftime("%Y-%m-%d")
+        current_label = to_calendar_day(
+            forecast_start_date + timedelta(days=leadtime)
+        )
         current_leadtime = f"Selected Leadtime: {current_label}"
 
         slider_style["display"] = "inline-block"
@@ -450,7 +456,7 @@ def register_callbacks(app: dash.Dash):
             return no_update, no_update
 
         stac = _get_stac_client()
-        forecast_reference_time_str = _forecast_reference_time(forecast_start_date)
+        forecast_reference_time_str = date_picker_to_reference_time(forecast_start_date)
         leadtime = 0 if leadtime is None else leadtime
 
         # Colour map only: rebuild tile URLs from the stored range.
