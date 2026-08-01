@@ -1,4 +1,4 @@
-/* Forecast map hosts: OpenLayers default, Leaflet. */
+/* Forecast map hosts: OpenLayers default, Cesium globe, Leaflet. */
 
 .forecast-map-root {
   width: inherit;
@@ -29,12 +29,26 @@
   z-index: 1;
 }
 
+#forecast-map-globe {
+  z-index: 1;
+}
+
 #forecast-map-leaflet {
   z-index: 1;
 }
 
+#forecast-map-globe:not(.forecast-map-host--hidden),
 #forecast-map-leaflet:not(.forecast-map-host--hidden) {
   z-index: 2;
+}
+
+/* Cesium fills its host. */
+#forecast-map-globe .cesium-viewer,
+#forecast-map-globe .cesium-viewer-cesiumWidgetContainer,
+#forecast-map-globe .cesium-widget,
+#forecast-map-globe .cesium-widget canvas {
+  width: 100%;
+  height: 100%;
 }
 
 .forecast-map-settings-btn {

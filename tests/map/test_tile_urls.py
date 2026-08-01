@@ -85,7 +85,7 @@ def test_label_for_known_and_unknown_custom_tms():
     assert label_for_view_mode("EPSG3031") == "EPSG:3031"
 
 
-def test_list_view_mode_options_includes_global_and_custom_epsg():
+def test_list_view_mode_options_includes_global_custom_and_globe():
     clear_tile_grid_cache()
     with patch(
         "map.projections.list_custom_epsg_tms_ids",
@@ -96,7 +96,16 @@ def test_list_view_mode_options_includes_global_and_custom_epsg():
     assert {"label": "Arctic", "value": "EPSG6931"} in options
     assert {"label": "Antarctic", "value": "EPSG6932"} in options
     assert {"label": "EPSG:3031", "value": "EPSG3031"} in options
+    assert options[-1] == {"label": "Globe", "value": "globe_cesium"}
     assert not any(o["value"] == "WebMercatorQuad" for o in options)
+
+
+def test_view_hint_for_globe_uses_web_mercator_without_fit():
+    hint = view_hint_for_mode(MapViewMode.GLOBE_CESIUM)
+    assert hint["projection"] == "EPSG:3857"
+    assert hint["showBasemap"] is True
+    assert hint["fit"] is False
+    assert hint["globe"] is True
 
 
 def test_failed_tile_grid_fetch_is_not_cached():
@@ -189,10 +198,11 @@ def test_bbox_fits_view_mode_by_hemisphere():
     assert bbox_fits_view_mode(antarctic, "EPSG3031")
 
 
-def test_resolve_engine_forces_openlayers_for_custom_tms_leaflet():
-    assert (
-        resolve_engine_for_mode("leaflet_legacy", "EPSG6931") == "openlayers"
-    )
+def test_resolve_engine_for_modes():
+    assert resolve_engine_for_mode("leaflet_legacy", "EPSG6931") == "openlayers"
+    assert resolve_engine_for_mode("openlayers", "globe_cesium") == "cesium"
+    assert resolve_engine_for_mode("leaflet_legacy", "globe_cesium") == "cesium"
+    assert resolve_engine_for_mode("cesium", "global_3857") == "openlayers"
     assert (
         resolve_engine_for_mode("leaflet_legacy", MapViewMode.GLOBAL_3857)
         == "leaflet_legacy"

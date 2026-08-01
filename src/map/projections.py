@@ -166,7 +166,7 @@ def label_for_view_mode(mode: str) -> str:
 
 def list_view_mode_options(tiler_url: str) -> list[dict[str, str]]:
     """
-    Build RadioItems options: Global plus custom ``EPSG####`` matrices on TiTiler.
+    Build RadioItems options: Global, custom ``EPSG####`` grids, then Globe.
 
     Args:
         tiler_url: TiTiler base URL used to list tile matrix sets.
@@ -182,6 +182,12 @@ def list_view_mode_options(tiler_url: str) -> list[dict[str, str]]:
     ]
     for tms_id in list_custom_epsg_tms_ids(tiler_url):
         options.append({"label": label_for_view_mode(tms_id), "value": tms_id})
+    options.append(
+        {
+            "label": label_for_view_mode(MapViewMode.GLOBE_CESIUM.value),
+            "value": MapViewMode.GLOBE_CESIUM.value,
+        }
+    )
     return options
 
 
@@ -247,6 +253,13 @@ def view_hint_for_mode(
         Dict consumed by the OpenLayers renderer.
     """
     view_mode = normalise_view_mode(mode)
+    if view_mode == MapViewMode.GLOBE_CESIUM.value:
+        return {
+            "projection": "EPSG:3857",
+            "showBasemap": True,
+            "fit": False,
+            "globe": True,
+        }
     if CUSTOM_EPSG_TMS_ID_RE.fullmatch(view_mode):
         if not tile_grid:
             return view_hint_for_mode(MapViewMode.GLOBAL_3857.value)
@@ -300,7 +313,8 @@ def resolve_engine_for_mode(engine: str, mode: str) -> str:
     """
     Return an engine that can render the requested view mode.
 
-    Leaflet implementation is Web Mercator only, so custom TMS modes force OpenLayers.
+    Globe: Cesium (default), OpenLayers (custom polar grids), or global Web Mercator.
+    Leaflet stays only for flat global Web Mercator.
 
     Args:
         engine: Requested map engine id.
@@ -309,7 +323,12 @@ def resolve_engine_for_mode(engine: str, mode: str) -> str:
     Returns:
         Engine id safe for ``mode`` (may equal ``engine``).
     """
-    if is_custom_tms_mode(mode) and engine == MapEngine.LEAFLET_LEGACY.value:
+    view_mode = normalise_view_mode(mode)
+    if view_mode == MapViewMode.GLOBE_CESIUM.value:
+        return MapEngine.CESIUM.value
+    if is_custom_tms_mode(view_mode):
+        return MapEngine.OPENLAYERS.value
+    if engine == MapEngine.CESIUM.value:
         return MapEngine.OPENLAYERS.value
     return engine
 

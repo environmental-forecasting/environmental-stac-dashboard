@@ -1,9 +1,10 @@
 /**
  * Forecast map bridge.
  *
- * Dash writes `map-state`; this module shows the right host (OpenLayers or
- * Leaflet) and forwards the state to the active renderer. Skips work
- * when `revision` is unchanged so tile layers are not rebuilt unnecessarily.
+ * Dash writes `map-state`; this module shows the right host (OpenLayers,
+ * Cesium, or Leaflet) and forwards the state to the active renderer. Skips
+ * work when `revision` is unchanged so tile layers are not rebuilt
+ * unnecessarily.
  */
 
 (function (global) {
@@ -22,12 +23,21 @@
 
     var engine = state.engine || "openlayers";
     var leafletHost = document.getElementById("forecast-map-leaflet");
+    var globeHost = document.getElementById("forecast-map-globe");
 
     if (leafletHost) {
       if (engine === "leaflet_legacy") {
         leafletHost.classList.remove("forecast-map-host--hidden");
       } else {
         leafletHost.classList.add("forecast-map-host--hidden");
+      }
+    }
+
+    if (globeHost) {
+      if (engine === "cesium") {
+        globeHost.classList.remove("forecast-map-host--hidden");
+      } else {
+        globeHost.classList.add("forecast-map-host--hidden");
       }
     }
 
@@ -39,6 +49,9 @@
 
     if (global.ForecastMapOpenLayers) {
       global.ForecastMapOpenLayers.applyState(state);
+    }
+    if (global.ForecastMapCesium) {
+      global.ForecastMapCesium.applyState(state);
     }
   }
 

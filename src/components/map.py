@@ -92,6 +92,10 @@ leaflet_map = html.Div(
                     className="forecast-map-host",
                 ),
                 html.Div(
+                    id="forecast-map-globe",
+                    className="forecast-map-host forecast-map-host--hidden",
+                ),
+                html.Div(
                     id="forecast-map-leaflet",
                     className="forecast-map-host forecast-map-host--hidden",
                     children=[_leaflet_map],
