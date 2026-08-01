@@ -1,19 +1,24 @@
 import math
+from functools import lru_cache
+
 import requests
 from rio_tiler.colormap import ColorMaps
+
+# One registry for the process: ColorMaps() loads cmap data on construction.
+COLOR_MAPS = ColorMaps()
 
 
 def round_2dp(value):
     return math.floor(value * 100) / 100
 
 
+@lru_cache(maxsize=64)
 def convert_colormap_to_colorscale(cmap: str):
     """
     Convert a rio_tiler colormap to colorscale format.
 
-    This function uses the `ColorMaps` utility to get the RGB and alpha values for each
-    color in the specified colormap, then formats them as strings suitable for use with
-    Dash-leaflet [Colorbar](https://www.dash-leaflet.com/components/controls/colorbar).
+    Uses a shared `ColorMaps` instance and caches the Dash-leaflet colorscale
+    strings so colormap changes do not rebuild the same palette repeatedly.
 
     Args:
         cmap: The name of the rio_tiler colormap to convert.
@@ -30,12 +35,11 @@ def convert_colormap_to_colorscale(cmap: str):
             'rgba(253,231,36,1.0)'
         ]
     """
-    cmap_dict = ColorMaps().get(cmap)
-    colorscale = [
+    cmap_dict = COLOR_MAPS.get(cmap)
+    return [
         f"rgba({cmap_dict[i][0]},{cmap_dict[i][1]},{cmap_dict[i][2]},{cmap_dict[i][3] / 255})"
         for i in range(len(cmap_dict))
     ]
-    return colorscale
 
 
 def to_tiler_asset_url(href: str, file_server_url: str, file_server_internal_url: str) -> str:
