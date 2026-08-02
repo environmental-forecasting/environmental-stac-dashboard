@@ -862,6 +862,7 @@ def register_callbacks(app: dash.Dash):
         Input("map-engine", "value"),
         State("rescale-store", "data"),
         State("map-state", "data"),
+        State("leadtime-playing", "data"),
         prevent_initial_call=True,
     )
     def update_cog_layer(
@@ -877,6 +878,7 @@ def register_callbacks(app: dash.Dash):
         map_engine: str,
         rescale_store,
         map_state,
+        leadtime_playing,
     ):
         """
         Update map COG layers from the cached forecast Item.
@@ -884,10 +886,12 @@ def register_callbacks(app: dash.Dash):
         Writes shared ``map-state`` for OpenLayers (default). When the engine is
         ``leaflet_legacy``, also builds Leaflet Overlay children. Auto mode
         prefers band STATISTICS_* on the Item; TiTiler statistics are only a
-        fallback. Colour map changes reuse rescale-store. fixed-min/max are
-        Inputs so fixed mode updates tiles, but they are not Outputs here
-        (avoids a feedback loop). A separate callback copies rescale-store into
-        the min/max inputs for display in auto mode.
+        fallback. Colour map changes reuse rescale-store. Leadtime changes
+        while playing (and scrubbing with a known scale) reuse that store so
+        stats are not re-queried mid-animation. fixed-min/max are Inputs so
+        fixed mode updates tiles, but they are not Outputs here (avoids a
+        feedback loop). A separate callback copies rescale-store into the
+        min/max inputs for display in auto mode.
 
         View-mode and engine changes rebuild tiles for the matching projection
         and host. Collections whose extent does not fit the hemisphere are
@@ -959,17 +963,8 @@ def register_callbacks(app: dash.Dash):
         forecast_reference_time_str = date_picker_to_reference_time(forecast_start_date)
         leadtime = 0 if leadtime is None else leadtime
 
-        # Colour map only: rebuild tile URLs from the stored range.
-        if (
-            triggered == "colormap-dropdown"
-            and not is_fixed
-            and isinstance(rescale_store, dict)
-            and "min" in rescale_store
-            and "max" in rescale_store
-        ):
-            min_val = rescale_store["min"]
-            max_val = rescale_store["max"]
-            layer_entries = _build_forecast_layer_entries(
+        def _layers_for_scale(min_val, max_val):
+            return _build_forecast_layer_entries(
                 stac,
                 collection_ids,
                 forecast_reference_time_str,
@@ -981,9 +976,52 @@ def register_callbacks(app: dash.Dash):
                 tile_matrix_set=tile_matrix_set,
                 view_mode=mode,
             )
+
+        # Colour map only: rebuild tile URLs from the stored range.
+        if (
+            triggered == "colormap-dropdown"
+            and not is_fixed
+            and isinstance(rescale_store, dict)
+            and "min" in rescale_store
+            and "max" in rescale_store
+        ):
+            layer_entries = _layers_for_scale(
+                rescale_store["min"], rescale_store["max"]
+            )
             if not layer_entries:
                 return no_update, no_update, no_update, no_update, no_update
             return _publish(layer_entries, no_update)
+
+        # Leadtime scrub/play: keep the current colour scale. Never re-query
+        # band stats mid-animation (or while scrubbing with a known scale).
+        reuse_leadtime_scale = triggered == "leadtime-slider" and (
+            bool(leadtime_playing)
+            or (
+                isinstance(rescale_store, dict)
+                and "min" in rescale_store
+                and "max" in rescale_store
+            )
+            or is_fixed
+        )
+        if reuse_leadtime_scale:
+            if is_fixed:
+                min_val = fixed_min if fixed_min is not None else 0
+                max_val = fixed_max if fixed_max is not None else 1
+            elif (
+                isinstance(rescale_store, dict)
+                and "min" in rescale_store
+                and "max" in rescale_store
+            ):
+                min_val = rescale_store["min"]
+                max_val = rescale_store["max"]
+            else:
+                min_val = None
+                max_val = None
+            if min_val is not None and max_val is not None:
+                layer_entries = _layers_for_scale(min_val, max_val)
+                if not layer_entries:
+                    return no_update, no_update, no_update, no_update, no_update
+                return _publish(layer_entries, no_update)
 
         min_vals: list[float] = []
         max_vals: list[float] = []
