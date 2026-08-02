@@ -325,6 +325,203 @@ def register_callbacks(app: dash.Dash):
         Input("map-state", "data"),
     )
 
+    # Leadtime transport / pace / keyboard (clientside for snappy playback).
+    # Programmatic slider writes set window.__forecastTimelineProgrammatic so
+    # pause-on-scrub does not immediately cancel play/interval advances.
+    app.clientside_callback(
+        """
+        function(n, playing, bounds, sliderMin, sliderMax, value) {
+            var nu = window.dash_clientside.no_update;
+            if (!playing) {
+                return [nu, nu, true];
+            }
+            var min = (bounds && bounds.min != null) ? Number(bounds.min)
+                : (sliderMin != null ? Number(sliderMin) : 0);
+            var max = (bounds && bounds.max != null) ? Number(bounds.max)
+                : (sliderMax != null ? Number(sliderMax) : 0);
+            var current = (value == null) ? min : Number(value);
+            if (!(max > min)) {
+                return [nu, false, true];
+            }
+            if (current >= max) {
+                return [nu, false, true];
+            }
+            window.__forecastTimelineProgrammatic = true;
+            return [current + 1, true, false];
+        }
+        """,
+        Output("leadtime-slider", "value", allow_duplicate=True),
+        Output("leadtime-playing", "data", allow_duplicate=True),
+        Output("leadtime-play-interval", "disabled", allow_duplicate=True),
+        Input("leadtime-play-interval", "n_intervals"),
+        State("leadtime-playing", "data"),
+        State("leadtime-bounds", "data"),
+        State("leadtime-slider", "min"),
+        State("leadtime-slider", "max"),
+        State("leadtime-slider", "value"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(playClicks, firstClicks, prevClicks, nextClicks, lastClicks, playing, bounds, sliderMin, sliderMax, value) {
+            var nu = window.dash_clientside.no_update;
+            var triggered = window.dash_clientside.callback_context.triggered_id;
+            var min = (bounds && bounds.min != null) ? Number(bounds.min)
+                : (sliderMin != null ? Number(sliderMin) : 0);
+            var max = (bounds && bounds.max != null) ? Number(bounds.max)
+                : (sliderMax != null ? Number(sliderMax) : 0);
+            var current = (value == null) ? min : Number(value);
+            var nextValue = current;
+            var nextPlaying = !!playing;
+
+            if (triggered === "leadtime-play") {
+                nextPlaying = !playing;
+                if (nextPlaying && current >= max) {
+                    nextValue = min;
+                }
+                // Single-frame forecasts have nothing to animate.
+                if (nextPlaying && !(max > min)) {
+                    nextPlaying = false;
+                }
+            } else if (triggered === "leadtime-first") {
+                nextValue = min;
+                nextPlaying = false;
+            } else if (triggered === "leadtime-prev") {
+                nextValue = Math.max(min, current - 1);
+                nextPlaying = false;
+            } else if (triggered === "leadtime-next") {
+                nextValue = Math.min(max, current + 1);
+                nextPlaying = false;
+            } else if (triggered === "leadtime-last") {
+                nextValue = max;
+                nextPlaying = false;
+            }
+
+            var valueOut = nu;
+            if (nextValue !== current) {
+                window.__forecastTimelineProgrammatic = true;
+                valueOut = nextValue;
+            }
+            return [valueOut, nextPlaying, !nextPlaying];
+        }
+        """,
+        Output("leadtime-slider", "value", allow_duplicate=True),
+        Output("leadtime-playing", "data"),
+        Output("leadtime-play-interval", "disabled"),
+        Input("leadtime-play", "n_clicks"),
+        Input("leadtime-first", "n_clicks"),
+        Input("leadtime-prev", "n_clicks"),
+        Input("leadtime-next", "n_clicks"),
+        Input("leadtime-last", "n_clicks"),
+        State("leadtime-playing", "data"),
+        State("leadtime-bounds", "data"),
+        State("leadtime-slider", "min"),
+        State("leadtime-slider", "max"),
+        State("leadtime-slider", "value"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(pace, custom) {
+            var ms = pace;
+            if (custom != null && custom !== "" && !Number.isNaN(Number(custom))) {
+                ms = Math.max(100, Math.min(5000, Number(custom)));
+            }
+            if (ms == null) {
+                ms = 750;
+            }
+            return [ms, ms];
+        }
+        """,
+        Output("leadtime-pace-ms", "data"),
+        Output("leadtime-play-interval", "interval"),
+        Input("leadtime-pace", "value"),
+        Input("leadtime-pace-custom", "value"),
+        prevent_initial_call=False,
+    )
+
+    app.clientside_callback(
+        """
+        function(value, playing) {
+            var nu = window.dash_clientside.no_update;
+            if (window.__forecastTimelineProgrammatic) {
+                window.__forecastTimelineProgrammatic = false;
+                return [nu, nu];
+            }
+            if (!playing) {
+                return [nu, nu];
+            }
+            return [false, true];
+        }
+        """,
+        Output("leadtime-playing", "data", allow_duplicate=True),
+        Output("leadtime-play-interval", "disabled", allow_duplicate=True),
+        Input("leadtime-slider", "value"),
+        State("leadtime-playing", "data"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(playing) {
+            var on = !!playing;
+            var icon = on ? "tabler:player-pause" : "tabler:player-play";
+            var cls = "forecast-timeline__btn forecast-timeline__btn--play";
+            if (on) {
+                cls += " is-playing";
+            }
+            return [icon, cls];
+        }
+        """,
+        Output("leadtime-play-icon", "icon"),
+        Output("leadtime-play", "className"),
+        Input("leadtime-playing", "data"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(_) {
+            if (window.__forecastTimelineKeysBound) {
+                return window.dash_clientside.no_update;
+            }
+            window.__forecastTimelineKeysBound = true;
+            window.addEventListener("keydown", function (event) {
+                if (window.ForecastTimelineKeys && window.ForecastTimelineKeys.isEditableTarget(event.target)) {
+                    return;
+                }
+                var key = event.key;
+                if (key !== " " && key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Home" && key !== "End") {
+                    return;
+                }
+                event.preventDefault();
+                var btnId = null;
+                if (key === " ") {
+                    btnId = "leadtime-play";
+                } else if (key === "ArrowLeft") {
+                    btnId = "leadtime-prev";
+                } else if (key === "ArrowRight") {
+                    btnId = "leadtime-next";
+                } else if (key === "Home") {
+                    btnId = "leadtime-first";
+                } else if (key === "End") {
+                    btnId = "leadtime-last";
+                }
+                var btn = btnId && document.getElementById(btnId);
+                if (btn) {
+                    btn.click();
+                }
+            });
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("leadtime-keys-bound", "data"),
+        Input("page-load-trigger", "data"),
+        prevent_initial_call=False,
+    )
+
     @app.callback(
         [Output("collections-dropdown", "options")],
         [Input("page-load-trigger", "data")],
