@@ -35,9 +35,7 @@ from map import (
     bbox_fits_view_mode,
     build_cog_tile_url,
     build_map_state,
-    list_map_engine_options,
     list_view_mode_options,
-    map_engine_hint,
     resolve_mode_and_engine,
     resolve_engine_for_mode,
     tile_matrix_set_for_mode,
@@ -325,6 +323,26 @@ def register_callbacks(app: dash.Dash):
         Input("map-state", "data"),
     )
 
+    # Optimistic host switch from view mode (do not wait on Python round-trip).
+    app.clientside_callback(
+        """
+        function(mode) {
+            var engine = "openlayers";
+            if (mode === "globe_cesium") {
+                engine = "cesium";
+            } else if (mode === "global_leaflet") {
+                engine = "leaflet_legacy";
+            }
+            if (window.ForecastMap && typeof window.ForecastMap.applyEngine === "function") {
+                window.ForecastMap.applyEngine(engine);
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("map-bridge-tick", "data", allow_duplicate=True),
+        Input("map-view-mode", "value"),
+        prevent_initial_call=True,
+    )
 
     # Leadtime transport / pace / keyboard (clientside for snappy playback).
     # Programmatic slider writes set window.__forecastTimelineProgrammatic so
@@ -560,21 +578,8 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_call=False,
     )
     def update_map_view_mode_options(_):
-        """Populate Global + custom EPSG#### views from TiTiler's TMS list."""
+        """Populate Global / Leaflet / Globe + custom EPSG#### views."""
         return list_view_mode_options(TILER_INTERNAL_URL)
-
-    @app.callback(
-        Output("map-engine", "options"),
-        Output("map-engine-hint", "children"),
-        Input("map-view-mode", "value"),
-        prevent_initial_call=False,
-    )
-    def update_map_engine_options(map_view_mode: str):
-        """Disable renderers that cannot show the active view."""
-        return (
-            list_map_engine_options(map_view_mode),
-            map_engine_hint(map_view_mode),
-        )
 
     @app.callback(
         [
@@ -861,7 +866,6 @@ def register_callbacks(app: dash.Dash):
         Output("cog-results-layer", "children"),
         Output("rescale-store", "data"),
         Output("map-view-mode", "value"),
-        Output("map-engine", "value"),
         Input("colormap-dropdown", "value"),
         Input("forecast-init-date-picker", "value"),
         Input("variable-dropdown", "value"),
@@ -871,7 +875,6 @@ def register_callbacks(app: dash.Dash):
         Input("collections-dropdown", "value"),
         Input("leadtime-slider", "value"),
         Input("map-view-mode", "value"),
-        Input("map-engine", "value"),
         State("rescale-store", "data"),
         State("map-state", "data"),
         State("leadtime-playing", "data"),
@@ -887,7 +890,6 @@ def register_callbacks(app: dash.Dash):
         collection_ids: list,
         leadtime: int,
         map_view_mode: str,
-        map_engine: str,
         rescale_store,
         map_state,
         leadtime_playing,
@@ -905,37 +907,28 @@ def register_callbacks(app: dash.Dash):
         feedback loop). A separate callback copies rescale-store into the
         min/max inputs for display in auto mode.
 
-        View-mode and engine changes rebuild tiles for the matching projection
-        and host. Collections whose extent does not fit the hemisphere are
-        skipped. Polar modes that lack a TiTiler TMS fall back to global Web
-        Mercator.
+        View-mode changes rebuild tiles for the matching projection and host
+        (engine is derived from the selected mode). Collections whose extent
+        does not fit the hemisphere are skipped. Polar modes that lack a
+        TiTiler TMS fall back to global Web Mercator.
         """
         triggered = callback_context.triggered_id
         ui_mode = map_view_mode or MapViewMode.GLOBAL_3857.value
-        ui_engine = map_engine or (
-            (map_state or {}).get("engine", MapEngine.OPENLAYERS.value)
-        )
-        requested_mode, requested_engine = resolve_mode_and_engine(
-            ui_mode,
-            ui_engine,
-            triggered=triggered,
-        )
+        requested_mode, _ = resolve_mode_and_engine(ui_mode)
 
         resolved_mode, view = view_mode_and_hint(requested_mode, TILER_INTERNAL_URL)
         mode = resolved_mode
-        engine = resolve_engine_for_mode(requested_engine, mode)
-        # Sync controls when mode/engine were adjusted for compatibility or TMS fallback.
+        engine = resolve_engine_for_mode(mode)
+        # Sync the view-mode control when mode was adjusted (TMS fallback).
         mode_control = mode if mode != ui_mode else no_update
-        engine_control = engine if engine != ui_engine else no_update
         try:
             tile_matrix_set = tile_matrix_set_for_mode(mode)
         except ValueError:
             tile_matrix_set = WEB_MERCATOR_QUAD
             mode = MapViewMode.GLOBAL_3857.value
             view = view_mode_and_hint(mode, TILER_INTERNAL_URL)[1]
-            engine = resolve_engine_for_mode(requested_engine, mode)
+            engine = resolve_engine_for_mode(mode)
             mode_control = mode if mode != ui_mode else no_update
-            engine_control = engine if engine != ui_engine else no_update
 
         def _publish(layer_entries, next_rescale):
             next_state = build_map_state(
@@ -955,21 +948,19 @@ def register_callbacks(app: dash.Dash):
                 leaflet_children,
                 next_rescale,
                 mode_control,
-                engine_control,
             )
 
-        control_triggers = ("map-view-mode", "map-engine")
-        # Allow projection / engine switches before a forecast date is chosen.
+        # Allow projection switches before a forecast date is chosen.
         if not forecast_start_date or band_index is None:
-            if triggered not in control_triggers:
-                return no_update, no_update, no_update, no_update, no_update
+            if triggered != "map-view-mode":
+                return no_update, no_update, no_update, no_update
             return _publish([], no_update)
 
         is_fixed = "fixed" in (fix_range or [])
 
         # Ignore write-back from syncing auto rescale into the min/max inputs.
         if triggered in ("fixed-min", "fixed-max") and not is_fixed:
-            return no_update, no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         stac = _get_stac_client()
         forecast_reference_time_str = date_picker_to_reference_time(forecast_start_date)
@@ -1001,7 +992,7 @@ def register_callbacks(app: dash.Dash):
                 rescale_store["min"], rescale_store["max"]
             )
             if not layer_entries:
-                return no_update, no_update, no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update
             return _publish(layer_entries, no_update)
 
         # Leadtime scrub/play: keep the current colour scale. Never re-query
@@ -1032,7 +1023,7 @@ def register_callbacks(app: dash.Dash):
             if min_val is not None and max_val is not None:
                 layer_entries = _layers_for_scale(min_val, max_val)
                 if not layer_entries:
-                    return no_update, no_update, no_update, no_update, no_update
+                    return no_update, no_update, no_update, no_update
                 return _publish(layer_entries, no_update)
 
         min_vals: list[float] = []
@@ -1084,7 +1075,7 @@ def register_callbacks(app: dash.Dash):
             # View-mode / engine change may leave no fitting layers; still update the host.
             if triggered in control_triggers:
                 return _publish([], no_update)
-            return no_update, no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         # Use first min/max, or optionally min(min_vals)/max(max_vals) for all layers
         min_val = min(min_vals)
@@ -1105,7 +1096,7 @@ def register_callbacks(app: dash.Dash):
         if not layer_entries:
             if triggered in control_triggers:
                 return _publish([], no_update)
-            return no_update, no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         new_store = {"min": min_val, "max": max_val}
         return _publish(layer_entries, new_store)

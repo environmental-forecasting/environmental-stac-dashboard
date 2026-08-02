@@ -15,7 +15,6 @@ from map.projections import (  # noqa: E402
     bbox_fits_view_mode,
     epsg_code_for_mode,
     label_for_view_mode,
-    list_map_engine_options,
     list_view_mode_options,
     normalise_view_mode,
     proj4_for_epsg,
@@ -96,10 +95,11 @@ def test_list_view_mode_options_includes_global_custom_and_globe():
     ):
         options = list_view_mode_options("http://tiler")
     assert options[0] == {"label": "Global", "value": "global_3857"}
+    assert options[1] == {"label": "Leaflet", "value": "global_leaflet"}
+    assert options[2] == {"label": "Globe", "value": "globe_cesium"}
     assert {"label": "Arctic", "value": "EPSG6931"} in options
     assert {"label": "Antarctic", "value": "EPSG6932"} in options
     assert {"label": "EPSG:3031", "value": "EPSG3031"} in options
-    assert options[-1] == {"label": "Globe", "value": "globe_cesium"}
     assert not any(o["value"] == "WebMercatorQuad" for o in options)
 
 
@@ -148,7 +148,7 @@ def test_view_hint_for_custom_mode_requires_tile_grid():
     grid = tile_grid_from_tms(_sample_polar_tms())
     hint = view_hint_for_mode("EPSG6931", tile_grid=grid)
     assert hint["projection"] == "EPSG:6931"
-    assert hint["showBasemap"] is False
+    assert hint["showBasemap"] is True
     assert hint["fit"] is True
     assert hint["extent"] == grid["extent"]
     assert hint["proj4"]
@@ -167,10 +167,10 @@ def test_view_hint_for_global_shows_basemap():
     hint = view_hint_for_mode(MapViewMode.GLOBAL_3857)
     assert hint["projection"] == "EPSG:3857"
     assert hint["showBasemap"] is True
-    assert hint["fit"] is False
-    assert hint["zoom"] == 2
+    assert hint["fit"] is True
+    assert hint["zoom"] == 0
     assert hint["showFullExtent"] is True
-    assert hint["multiWorld"] is True
+    assert hint["multiWorld"] is False
     assert hint["minZoom"] == 0
 
 
@@ -203,44 +203,20 @@ def test_bbox_fits_view_mode_by_hemisphere():
 
 
 def test_resolve_engine_for_modes():
-    assert resolve_engine_for_mode("leaflet_legacy", "EPSG6931") == "openlayers"
-    assert resolve_engine_for_mode("openlayers", "globe_cesium") == "cesium"
-    assert resolve_engine_for_mode("leaflet_legacy", "globe_cesium") == "cesium"
-    assert resolve_engine_for_mode("cesium", "global_3857") == "cesium"
-    assert (
-        resolve_engine_for_mode("leaflet_legacy", MapViewMode.GLOBAL_3857)
-        == "leaflet_legacy"
+    assert resolve_engine_for_mode("EPSG6931") == "openlayers"
+    assert resolve_engine_for_mode("globe_cesium") == "cesium"
+    assert resolve_engine_for_mode("global_3857") == "openlayers"
+    assert resolve_engine_for_mode("global_leaflet") == "leaflet_legacy"
+
+
+def test_resolve_mode_and_engine_derives_engine_from_mode():
+    assert resolve_mode_and_engine("globe_cesium") == ("globe_cesium", "cesium")
+    assert resolve_mode_and_engine("global_3857") == ("global_3857", "openlayers")
+    assert resolve_mode_and_engine("global_leaflet") == (
+        "global_leaflet",
+        "leaflet_legacy",
     )
-
-
-def test_resolve_mode_and_engine_for_control_changes():
-    assert resolve_mode_and_engine(
-        "globe_cesium", "leaflet_legacy", triggered="map-view-mode"
-    ) == ("globe_cesium", "cesium")
-    assert resolve_mode_and_engine(
-        "global_3857", "cesium", triggered="map-view-mode"
-    ) == ("global_3857", "openlayers")
-    assert resolve_mode_and_engine(
-        "global_3857", "leaflet_legacy", triggered="map-view-mode"
-    ) == ("global_3857", "leaflet_legacy")
-    assert resolve_mode_and_engine(
-        "globe_cesium", "openlayers", triggered="map-engine"
-    ) == ("global_3857", "openlayers")
-    assert resolve_mode_and_engine(
-        "EPSG6931", "cesium", triggered="map-engine"
-    ) == ("EPSG6931", "openlayers")
-    assert resolve_mode_and_engine(
-        "global_3857", "cesium", triggered="map-engine"
-    ) == ("global_3857", "cesium")
-
-
-def test_list_map_engine_options():
-    options = list_map_engine_options()
-    assert options == [
-        {"label": "OpenLayers", "value": "openlayers"},
-        {"label": "Cesium", "value": "cesium"},
-        {"label": "Leaflet (legacy)", "value": "leaflet_legacy"},
-    ]
+    assert resolve_mode_and_engine("EPSG6931") == ("EPSG6931", "openlayers")
 
 
 def test_unknown_mode_raises():

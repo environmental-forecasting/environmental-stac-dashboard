@@ -12,6 +12,8 @@
   var basemapUrl = null;
   var applyGeneration = 0;
   var progressListener = null;
+  // Height above ellipsoid that frames the whole Earth in a typical map pane.
+  var FULL_GLOBE_HEIGHT_M = 2.4e7;
 
   function getHost() {
     return document.getElementById(HOST_ID);
@@ -24,6 +26,21 @@
         credit: new Cesium.Credit("© OpenStreetMap contributors"),
       })
     );
+  }
+
+  /** Frame the whole Earth (equatorial, looking straight down). */
+  function showFullGlobe() {
+    if (!viewer) {
+      return;
+    }
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(0, 0, FULL_GLOBE_HEIGHT_M),
+      orientation: {
+        heading: 0,
+        pitch: Cesium.Math.toRadians(-90),
+        roll: 0,
+      },
+    });
   }
 
   function ensureViewer() {
@@ -64,14 +81,18 @@
     basemapUrl = OSM_URL;
     viewer.scene.globe.enableLighting = false;
     viewer.scene.fog.enabled = false;
+    // Ground atmosphere washes OSM/forecast tiles out when zoomed out.
+    viewer.scene.globe.showGroundAtmosphere = false;
     if (viewer.scene.skyAtmosphere) {
       viewer.scene.skyAtmosphere.show = true;
     }
+    // Allow zooming out far enough to keep the whole globe in frame.
+    viewer.scene.screenSpaceCameraController.minimumZoomDistance = 1.0e5;
+    viewer.scene.screenSpaceCameraController.maximumZoomDistance =
+      FULL_GLOBE_HEIGHT_M * 1.5;
 
-    // Start with a whole-Earth view.
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(0, 20, 18000000),
-    });
+    // Host is often still hidden (0×0) here; applyState re-frames after resize.
+    showFullGlobe();
 
     return viewer;
   }
@@ -172,10 +193,15 @@
     if (!host) {
       return;
     }
+    var wasHidden = host.classList.contains("forecast-map-host--hidden");
     if (visible) {
       host.classList.remove("forecast-map-host--hidden");
       if (viewer) {
         viewer.resize();
+        // Camera set while 0×0 is wrong; re-frame the whole globe on first show.
+        if (wasHidden) {
+          showFullGlobe();
+        }
       }
       return;
     }
@@ -227,6 +253,10 @@
       setHostVisible(false);
       return;
     }
+    var host = getHost();
+    var wasHidden = !!(
+      host && host.classList.contains("forecast-map-host--hidden")
+    );
     setHostVisible(true);
     if (!ensureViewer()) {
       return;
@@ -235,6 +265,10 @@
     setBasemap(state.basemap, state.view && state.view.showBasemap);
     syncLayers(state.layers);
     viewer.resize();
+    // ensureViewer may have run while the host was still hidden.
+    if (wasHidden) {
+      showFullGlobe();
+    }
     if (state.layers && state.layers.length) {
       waitForTiles(generation);
     } else {

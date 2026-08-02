@@ -1,22 +1,42 @@
-import dash_bootstrap_components as dbc
+"""App header: brand, map view-mode pills, and BAS links."""
 
-header_layout = dbc.NavbarSimple(
-    brand="IceNet",
-    brand_href="https://icenet.ai",
-    color="dark",
-    dark=True,
-    class_name="app-header p-0 py-1",
+import dash_bootstrap_components as dbc
+from dash import dcc, html
+
+header_layout = html.Div(
+    className="forecast-header",
     children=[
+        html.A(
+            "IceNet",
+            href="https://icenet.ai",
+            className="forecast-header__brand",
+            target="_blank",
+            rel="noopener noreferrer",
+        ),
+        html.Div(
+            dcc.RadioItems(
+                id="map-view-mode",
+                options=[
+                    {"label": "Global", "value": "global_3857"},
+                ],
+                value="global_3857",
+                inline=True,
+                className="forecast-map-view-mode",
+            ),
+            className="forecast-header__view-mode",
+        ),
         dbc.DropdownMenu(
             nav=False,
-            in_navbar=True,
             align_end=True,
             label="Part of British Antarctic Survey",
             toggle_style={
                 "border": 0,
                 "padding": "0.25rem 0.5rem",
                 "fontSize": "0.85rem",
+                "color": "#c5cede",
+                "background": "transparent",
             },
+            class_name="forecast-header__bas",
             children=[
                 dbc.DropdownMenuItem("British Antarctic Survey", header=True),
                 dbc.DropdownMenuItem("BAS Home", href="https://www.bas.ac.uk/"),

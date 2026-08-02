@@ -35,17 +35,50 @@
   flex: 0 0 auto;
 }
 
-.app-shell__header .navbar,
-.app-shell__header .navbar.bg-black,
-.app-shell__header .navbar.bg-dark {
-  min-height: 0;
-  padding-top: 0.15rem;
-  padding-bottom: 0.15rem;
-  background: transparent !important;
-  background-color: transparent !important;
-  border: none !important;
-  border-bottom: none !important;
-  box-shadow: none !important;
+.forecast-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.5rem;
+  padding: 0.35rem 1rem;
+  width: 100%;
+}
+
+.forecast-header__brand {
+  justify-self: start;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #e8eef6;
+  text-decoration: none;
+}
+
+.forecast-header__brand:hover {
+  color: #fff;
+  text-decoration: none;
+}
+
+.forecast-header__view-mode {
+  justify-self: center;
+  border-radius: 999px;
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  max-width: min(100%, 36rem);
+}
+
+.forecast-header__bas {
+  justify-self: end;
+}
+
+.forecast-header__bas .dropdown-toggle {
+  color: #c5cede !important;
+}
+
+.forecast-header__bas .dropdown-toggle:hover,
+.forecast-header__bas .dropdown-toggle:focus {
+  color: #fff !important;
 }
 
 .app-shell__header .container,
@@ -216,17 +249,6 @@
   height: 100%;
 }
 
-.forecast-map-view-mode-wrap {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  max-width: calc(100% - 24px);
-  border-radius: 999px;
-  padding: 3px;
-}
-
 .forecast-map-view-mode {
   display: flex;
   flex-wrap: wrap;
@@ -235,7 +257,8 @@
   margin: 0;
 }
 
-.forecast-map-view-mode label {
+.forecast-map-view-mode label,
+.forecast-map-view-mode .dash-options-list-option {
   margin: 0;
   padding: 5px 12px;
   border-radius: 999px;
@@ -245,7 +268,8 @@
   user-select: none;
 }
 
-.forecast-map-view-mode label:hover {
+.forecast-map-view-mode label:hover,
+.forecast-map-view-mode .dash-options-list-option:hover {
   background: rgba(255, 255, 255, 0.06);
 }
 
@@ -255,7 +279,11 @@
   pointer-events: none;
 }
 
-.forecast-map-view-mode label:has(> input:checked) {
+/* Dash nests the radio inside a span; also sets class "selected" on the option. */
+.forecast-map-view-mode label.selected,
+.forecast-map-view-mode .dash-options-list-option.selected,
+.forecast-map-view-mode label:has(input:checked),
+.forecast-map-view-mode .dash-options-list-option:has(input:checked) {
   background: #3d7ab5;
   color: #fff;
 }
@@ -369,36 +397,6 @@
   background: rgba(255, 255, 255, 0.14);
 }
 
-.forecast-map-engine {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-}
-
-.forecast-map-engine label {
-  margin: 0;
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 13px;
-  color: #d5dceb;
-  font-weight: normal;
-  cursor: pointer;
-}
-
-.forecast-map-engine label:has(input:disabled) {
-  color: #6b7588;
-  cursor: not-allowed;
-}
-
-.forecast-map-engine-hint {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.35;
-  color: #8b96ab;
-  min-height: 1em;
-}
-
 /* Fixed-height timeline below the map - joins seam/sidebar/footer. */
 .forecast-timeline {
   flex: 0 0 96px;
@@ -503,50 +501,27 @@
   justify-content: flex-end;
 }
 
-.forecast-timeline__pace-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #8b96ab;
-}
-
-.forecast-timeline__pace {
-  display: flex;
-  gap: 2px;
-  margin: 0;
-  padding: 2px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.25);
-}
-
-.forecast-timeline__pace label {
-  margin: 0;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 12px;
+.forecast-timeline__speed-label {
+  font-size: 13px;
   color: #c5cede;
-  cursor: pointer;
 }
 
-.forecast-timeline__pace label:has(> input:checked) {
-  background: #3d7ab5;
-  color: #fff;
+/* Capsule around Speed pills (same chrome as header TMS selector). */
+.forecast-timeline__right .forecast-map-view-mode {
+  border-radius: 999px;
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.forecast-timeline__pace input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.forecast-timeline__pace-custom {
+.forecast-timeline__speed-custom {
   width: 72px;
-  border-radius: 6px;
-  padding: 4px 6px;
+  border-radius: 999px;
+  padding: 5px 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.25);
+  background: transparent;
   color: #e8ecf4;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .forecast-timeline__scrubber {
@@ -686,11 +661,20 @@
 
 /* Narrow viewports: keep flex push layout; only tighten chrome. */
 @media (max-width: 720px) {
-  .forecast-map-view-mode-wrap {
-    left: 12px;
-    right: 12px;
-    transform: none;
-    max-width: none;
+  .forecast-header {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.75rem;
+  }
+
+  .forecast-header__brand,
+  .forecast-header__bas {
+    justify-self: center;
+  }
+
+  .forecast-header__view-mode {
+    max-width: 100%;
     border-radius: 8px;
   }
 

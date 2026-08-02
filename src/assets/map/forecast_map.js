@@ -15,9 +15,16 @@
   "use strict";
 
   var lastRevision = null;
+  var lastState = null;
+  var activeEngine = "openlayers";
   var tilesReady = true;
   var readyTimeout = null;
-  var READY_TIMEOUT_MS = 15000;
+  // Playback gates on tilesReady; keep this short so a missed rendercomplete
+  // cannot freeze Play for tens of seconds when switching TMS / engines.
+  var READY_TIMEOUT_MS = 4000;
+  // Optimistic engine switches use revisions above this so a later Python
+  // map-state publish (revision N+1) still applies.
+  var LOCAL_REVISION_BASE = 1000000000;
 
   function clearReadyTimeout() {
     if (readyTimeout) {
@@ -51,8 +58,11 @@
       return;
     }
     lastRevision = state.revision;
+    // Keep a copy for optimistic engine switches (before Python round-trips).
+    lastState = state;
 
     var engine = state.engine || "openlayers";
+    activeEngine = engine;
     var layers = state.layers || [];
     var leafletHost = document.getElementById("forecast-map-leaflet");
     var globeHost = document.getElementById("forecast-map-globe");
@@ -96,11 +106,20 @@
       setTilesReady(true);
     }
 
-    if (global.ForecastMapOpenLayers) {
+    // Only drive the active host. Inactive renderers stay warm but are not
+    // asked to rebuild layers on every engine / TMS switch.
+    if (engine === "openlayers" && global.ForecastMapOpenLayers) {
       global.ForecastMapOpenLayers.applyState(state);
-    }
-    if (global.ForecastMapCesium) {
+    } else if (engine === "cesium" && global.ForecastMapCesium) {
       global.ForecastMapCesium.applyState(state);
+    }
+
+    // Still hide inactive hosts when applyState was skipped for them.
+    if (engine !== "openlayers" && global.ForecastMapOpenLayers) {
+      global.ForecastMapOpenLayers.applyState({ engine: "none", revision: -1 });
+    }
+    if (engine !== "cesium" && global.ForecastMapCesium) {
+      global.ForecastMapCesium.applyState({ engine: "none", revision: -1 });
     }
 
     if (engine === "leaflet_legacy") {
@@ -108,8 +127,30 @@
     }
   }
 
+  /**
+   * Switch map host immediately using the last known layers/view.
+   *
+   * Used when the user changes view mode so the UI does not wait on the
+   * Python ``update_cog_layer`` round-trip (keeps playback speed responsive).
+   */
+  function applyEngine(engine) {
+    if (!engine || !lastState) {
+      return;
+    }
+    if (engine === (lastState.engine || "openlayers")) {
+      return;
+    }
+    applyState(
+      Object.assign({}, lastState, {
+        engine: engine,
+        revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
+      })
+    );
+  }
+
   global.ForecastMap = {
     applyState: applyState,
+    applyEngine: applyEngine,
     setTilesReady: setTilesReady,
     isTilesReady: isTilesReady,
   };

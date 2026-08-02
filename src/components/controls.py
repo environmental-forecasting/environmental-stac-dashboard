@@ -81,18 +81,6 @@ controls_panel = html.Div(
                 ),
             ],
         ),
-        html.Label("Map renderer"),
-        dcc.RadioItems(
-            id="map-engine",
-            options=[
-                {"label": "OpenLayers", "value": "openlayers"},
-                {"label": "Cesium", "value": "cesium"},
-                {"label": "Leaflet (legacy)", "value": "leaflet_legacy"},
-            ],
-            value="openlayers",
-            className="forecast-map-engine",
-        ),
-        html.Div(id="map-engine-hint", className="forecast-map-engine-hint"),
     ],
     id="controls",
     className="forecast-controls-panel forecast-chrome",

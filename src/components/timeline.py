@@ -120,7 +120,7 @@ timeline_bar = html.Div(
                 ),
                 html.Div(
                     [
-                        html.Span("Pace", className="forecast-timeline__pace-label"),
+                        html.Span("Speed", className="forecast-timeline__speed-label"),
                         dcc.RadioItems(
                             id="leadtime-pace",
                             options=[
@@ -130,7 +130,8 @@ timeline_bar = html.Div(
                             ],
                             value=750,
                             inline=True,
-                            className="forecast-timeline__pace",
+                            # Same pill highlight as the header TMS / view-mode selector.
+                            className="forecast-map-view-mode",
                         ),
                         dcc.Input(
                             id="leadtime-pace-custom",
@@ -140,7 +141,7 @@ timeline_bar = html.Div(
                             step=50,
                             placeholder="ms",
                             debounce=True,
-                            className="forecast-timeline__pace-custom",
+                            className="forecast-timeline__speed-custom",
                         ),
                     ],
                     className="forecast-timeline__right",

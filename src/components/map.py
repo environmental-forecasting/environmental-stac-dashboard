@@ -1,4 +1,4 @@
-"""Map hosts and on-map chrome (view modes). Controls live in the layout column."""
+"""Map hosts and shared map stores. View-mode pills live in the header."""
 
 import dash_leaflet as dl
 from dash import dcc, html
@@ -8,7 +8,7 @@ from map.state import initial_map_state
 DEFAULT_CENTER = [0, 0]
 DEFAULT_ZOOM = 2
 
-# Leaflet map (hidden while OpenLayers is the default engine).
+# Leaflet host (hidden unless the Leaflet view mode is selected).
 # Colourbar lives in the timeline (shared HTML ramp), not on the map face.
 _leaflet_map = dl.Map(
     [
@@ -51,18 +51,6 @@ leaflet_map = html.Div(
                     children=[_leaflet_map],
                 ),
             ],
-        ),
-        html.Div(
-            dcc.RadioItems(
-                id="map-view-mode",
-                options=[
-                    {"label": "Global", "value": "global_3857"},
-                ],
-                value="global_3857",
-                inline=True,
-                className="forecast-map-view-mode",
-            ),
-            className="forecast-map-view-mode-wrap forecast-glass",
         ),
         dcc.Store(id="forecast-dates-store", data=None),
         dcc.Store(id="fix-colorbar-range", data=None),

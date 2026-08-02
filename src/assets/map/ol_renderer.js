@@ -173,8 +173,8 @@
       projection: projectionCode,
       center: ol.proj.fromLonLat(center, projectionCode),
       zoom: view && view.zoom != null ? view.zoom : 0,
-      // Allow zooming out past one world so forecast overlays can repeat on X.
-      multiWorld: view && view.multiWorld === false ? false : true,
+      // Default off so a full-world fit is one Earth, not repeated lobes.
+      multiWorld: !!(view && view.multiWorld),
       showFullExtent: view && view.showFullExtent === false ? false : true,
       minZoom: view && view.minZoom != null ? view.minZoom : 0,
     };
@@ -226,18 +226,33 @@
     registerProjection(projectionCode, view.proj4, view.extent);
     var tileGrid = buildTileGrid(view);
     var projectionChanged = projectionCode !== currentProjection;
+    // Prefer data footprint (fitExtent) so polar forecasts fill the view;
+    // otherwise fit the CRS world so Global shows the entire map on load.
+    var fitExtent = view.fit
+      ? view.fitExtent || view.extent || worldExtentFor(projectionCode)
+      : null;
+
+    var previousTileGrid = currentTileGrid;
+    // Always assign (including null) so polar -> Global clears the custom grid.
+    currentTileGrid = tileGrid;
+    var gridChanged = previousTileGrid !== currentTileGrid;
+
     if (!projectionChanged) {
+      if (fitExtent) {
+        pendingFitExtent = fitExtent;
+        fitViewExtent(map.getView(), fitExtent);
+      }
+      if (gridChanged) {
+        refreshOverlaySources();
+      }
       return;
     }
 
     currentProjection = projectionCode;
-    currentTileGrid = tileGrid;
     pendingFitExtent = null;
 
     var nextView;
-    var fitExtent = null;
     if (view.fit) {
-      fitExtent = view.extent || worldExtentFor(projectionCode);
       if (view.extent && projectionCode !== "EPSG:3857") {
         nextView = new ol.View({
           projection: projectionCode,
@@ -318,6 +333,7 @@
       // every leadtime tick forces a full map redraw.
       if (wasHidden && map) {
         map.updateSize();
+        tryPendingFit();
       }
       return;
     }

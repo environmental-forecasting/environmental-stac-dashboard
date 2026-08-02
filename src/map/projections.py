@@ -30,6 +30,7 @@ class MapViewMode(StrEnum):
     """Fixed product view modes (not discovered from TiTiler)."""
 
     GLOBAL_3857 = "global_3857"
+    GLOBAL_LEAFLET = "global_leaflet"
     GLOBE_CESIUM = "globe_cesium"
 
 
@@ -41,6 +42,15 @@ class MapEngine(StrEnum):
     LEAFLET_LEGACY = "leaflet_legacy"
 
 
+_WEB_MERCATOR_MODES = frozenset(
+    (
+        MapViewMode.GLOBAL_3857.value,
+        MapViewMode.GLOBAL_LEAFLET.value,
+        MapViewMode.GLOBE_CESIUM.value,
+    )
+)
+
+
 def normalise_view_mode(mode: str | None) -> str:
     """
     Normalise a view-mode id (empty -> global).
@@ -49,7 +59,8 @@ def normalise_view_mode(mode: str | None) -> str:
         mode: Raw mode string from the UI or store.
 
     Returns:
-        Mode id (e.g. ``global_3857``, ``globe_cesium``, or ``EPSG####``).
+        Mode id (e.g. ``global_3857``, ``global_leaflet``, ``globe_cesium``,
+        or ``EPSG####``).
     """
     if not mode:
         return MapViewMode.GLOBAL_3857.value
@@ -66,7 +77,8 @@ def tile_matrix_set_for_mode(mode: str) -> str:
     Return the TiTiler tile matrix set id for a view mode.
 
     Args:
-        mode: View mode id (``global_3857``, ``globe_cesium``, or ``EPSG####``).
+        mode: View mode id (``global_3857``, ``global_leaflet``,
+            ``globe_cesium``, or ``EPSG####``).
 
     Returns:
         Tile matrix set identifier such as ``WebMercatorQuad`` or ``EPSG6931``.
@@ -75,10 +87,7 @@ def tile_matrix_set_for_mode(mode: str) -> str:
         ValueError: If ``mode`` is not a known product or custom TMS mode.
     """
     view_mode = normalise_view_mode(mode)
-    if view_mode in (
-        MapViewMode.GLOBAL_3857.value,
-        MapViewMode.GLOBE_CESIUM.value,
-    ):
+    if view_mode in _WEB_MERCATOR_MODES:
         return WEB_MERCATOR_QUAD
     if CUSTOM_EPSG_TMS_ID_RE.fullmatch(view_mode):
         return view_mode
@@ -99,10 +108,7 @@ def epsg_code_for_mode(mode: str) -> int:
         ValueError: If ``mode`` is not recognised.
     """
     view_mode = normalise_view_mode(mode)
-    if view_mode in (
-        MapViewMode.GLOBAL_3857.value,
-        MapViewMode.GLOBE_CESIUM.value,
-    ):
+    if view_mode in _WEB_MERCATOR_MODES:
         return 3857
     match = CUSTOM_EPSG_TMS_ID_RE.fullmatch(view_mode)
     if match:
@@ -154,6 +160,8 @@ def label_for_view_mode(mode: str) -> str:
     view_mode = normalise_view_mode(mode)
     if view_mode == MapViewMode.GLOBAL_3857.value:
         return "Global"
+    if view_mode == MapViewMode.GLOBAL_LEAFLET.value:
+        return "Leaflet"
     if view_mode == MapViewMode.GLOBE_CESIUM.value:
         return "Globe"
     if view_mode in _TMS_LABELS:
@@ -166,7 +174,9 @@ def label_for_view_mode(mode: str) -> str:
 
 def list_view_mode_options(tiler_url: str) -> list[dict[str, str]]:
     """
-    Build RadioItems options: Global, custom ``EPSG####`` grids, then Globe.
+    Build RadioItems options: Global, Leaflet, Globe, then custom TMS grids.
+
+    Engine is derived from the selected mode (no separate renderer control).
 
     Args:
         tiler_url: TiTiler base URL used to list tile matrix sets.
@@ -178,16 +188,18 @@ def list_view_mode_options(tiler_url: str) -> list[dict[str, str]]:
         {
             "label": label_for_view_mode(MapViewMode.GLOBAL_3857.value),
             "value": MapViewMode.GLOBAL_3857.value,
-        }
-    ]
-    for tms_id in list_custom_epsg_tms_ids(tiler_url):
-        options.append({"label": label_for_view_mode(tms_id), "value": tms_id})
-    options.append(
+        },
+        {
+            "label": label_for_view_mode(MapViewMode.GLOBAL_LEAFLET.value),
+            "value": MapViewMode.GLOBAL_LEAFLET.value,
+        },
         {
             "label": label_for_view_mode(MapViewMode.GLOBE_CESIUM.value),
             "value": MapViewMode.GLOBE_CESIUM.value,
-        }
-    )
+        },
+    ]
+    for tms_id in list_custom_epsg_tms_ids(tiler_url):
+        options.append({"label": label_for_view_mode(tms_id), "value": tms_id})
     return options
 
 
@@ -206,10 +218,7 @@ def resolve_view_mode(mode: str | None, tiler_url: str) -> str:
         A mode id that can be rendered with the current tiler configuration.
     """
     view_mode = normalise_view_mode(mode)
-    if view_mode in (
-        MapViewMode.GLOBAL_3857.value,
-        MapViewMode.GLOBE_CESIUM.value,
-    ):
+    if view_mode in _WEB_MERCATOR_MODES:
         return view_mode
 
     if CUSTOM_EPSG_TMS_ID_RE.fullmatch(view_mode):
@@ -273,20 +282,20 @@ def view_hint_for_mode(
             "extent": list(tile_grid["extent"]),
             "origin": list(tile_grid["origin"]),
             "resolutions": list(tile_grid["resolutions"]),
-            # OSM is Web Mercator; reprojecting it into EASE makes a doughnut
-            # around the pole. Polar modes show the forecast grid alone.
-            "showBasemap": False,
+            # OSM stays Web Mercator; OpenLayers reprojects it into this view.
+            "showBasemap": True,
             "fit": True,
         }
     return {
         "projection": "EPSG:3857",
         "center": [0, 0],
-        # Match Leaflet's default zoom; multiWorld lets overlays repeat on X.
-        "zoom": 2,
+        # Zoom 0 + fit world so the first Global view shows the full map.
+        "zoom": 0,
         "showBasemap": True,
-        "fit": False,
+        "fit": True,
         "showFullExtent": True,
-        "multiWorld": True,
+        # One world only; wrapping repeats overlays beside the basemap.
+        "multiWorld": False,
         "minZoom": 0,
     }
 
@@ -311,162 +320,38 @@ def view_mode_and_hint(
     return resolved, view_hint_for_mode(resolved, tile_grid=tile_grid)
 
 
-_ENGINE_LABELS: dict[str, str] = {
-    MapEngine.OPENLAYERS.value: "OpenLayers",
-    MapEngine.CESIUM.value: "Cesium",
-    MapEngine.LEAFLET_LEGACY.value: "Leaflet (legacy)",
-}
-
-
-def normalise_engine(engine: str | None) -> str:
+def resolve_engine_for_mode(mode: str) -> str:
     """
-    Return a known map engine, defaulting to OpenLayers when the value is missing or unrecognised.
+    Return the map engine for a view mode.
+
+    Globe uses Cesium, Leaflet mode uses Leaflet, everything else OpenLayers.
 
     Args:
-        engine: Raw engine string from the UI or store.
-
-    Returns:
-        One of ``MapEngine`` values.
-    """
-    if engine in (
-        MapEngine.OPENLAYERS.value,
-        MapEngine.CESIUM.value,
-        MapEngine.LEAFLET_LEGACY.value,
-    ):
-        return engine
-    return MapEngine.OPENLAYERS.value
-
-
-def label_for_engine(engine: str) -> str:
-    """Return a short UI label for a map engine."""
-    return _ENGINE_LABELS.get(normalise_engine(engine), normalise_engine(engine))
-
-
-def list_map_engine_options(mode: str | None = None) -> list[dict[str, object]]:
-    """
-    Build RadioItems options for OpenLayers, Cesium, and legacy Leaflet.
-
-    Polar views only allow OpenLayers. Globe only allows Cesium. Other options
-    stay listed but disabled so the choice is visible rather than snapping away.
-
-    Args:
-        mode: Active view mode id (disables incompatible engines).
-
-    Returns:
-        Option dicts for ``dcc.RadioItems`` (may include ``disabled``).
-    """
-    view_mode = normalise_view_mode(mode)
-    polar_only = is_custom_tms_mode(view_mode)
-    globe_only = view_mode == MapViewMode.GLOBE_CESIUM.value
-    options: list[dict[str, object]] = []
-    for engine in (
-        MapEngine.OPENLAYERS,
-        MapEngine.CESIUM,
-        MapEngine.LEAFLET_LEGACY,
-    ):
-        option: dict[str, object] = {
-            "label": label_for_engine(engine.value),
-            "value": engine.value,
-        }
-        if polar_only and engine is not MapEngine.OPENLAYERS:
-            option["disabled"] = True
-        elif globe_only and engine is not MapEngine.CESIUM:
-            option["disabled"] = True
-        options.append(option)
-    return options
-
-
-def map_engine_hint(mode: str | None = None) -> str:
-    """
-    Short hint shown under the map-renderer control.
-
-    Args:
-        mode: Active view mode id.
-
-    Returns:
-        Explanation when the view locks the renderer, otherwise empty.
-    """
-    view_mode = normalise_view_mode(mode)
-    if is_custom_tms_mode(view_mode):
-        return "Polar views use the flat map."
-    if view_mode == MapViewMode.GLOBE_CESIUM.value:
-        return "Globe view uses the 3D map."
-    return ""
-
-
-def resolve_engine_for_mode(engine: str, mode: str) -> str:
-    """
-    Return an engine that can render the requested view mode.
-
-    Globe always uses Cesium. Custom polar grids need OpenLayers. On Global,
-    the requested engine is honoured (OpenLayers, Cesium, or Leaflet).
-
-    Args:
-        engine: Requested map engine id.
         mode: View mode id.
 
     Returns:
-        Engine id safe for ``mode`` (may equal ``engine``).
+        Engine id for ``mode``.
     """
     view_mode = normalise_view_mode(mode)
-    requested = normalise_engine(engine)
     if view_mode == MapViewMode.GLOBE_CESIUM.value:
         return MapEngine.CESIUM.value
-    if is_custom_tms_mode(view_mode):
-        return MapEngine.OPENLAYERS.value
-    return requested
+    if view_mode == MapViewMode.GLOBAL_LEAFLET.value:
+        return MapEngine.LEAFLET_LEGACY.value
+    return MapEngine.OPENLAYERS.value
 
 
-def resolve_mode_and_engine(
-    mode: str | None,
-    engine: str | None,
-    *,
-    triggered: str | None = None,
-) -> tuple[str, str]:
+def resolve_mode_and_engine(mode: str | None) -> tuple[str, str]:
     """
-    Pick a view and map engine that work together.
-
-    Choosing Globe always uses the 3D globe. Choosing Global (or another flat
-    view) while Cesium is active switches to OpenLayers so the flat map appears.
-    Arctic and Antarctic views always use the flat OpenLayers map.
+    Pick a view mode and its matching map engine.
 
     Args:
         mode: Requested view mode id.
-        engine: Requested map engine id.
-        triggered: Dash ``callback_context.triggered_id`` when known.
 
     Returns:
         ``(resolved_mode, resolved_engine)`` before TiTiler TMS fallback.
     """
     view_mode = normalise_view_mode(mode)
-    requested_engine = normalise_engine(engine)
-
-    if triggered == "map-view-mode":
-        if view_mode == MapViewMode.GLOBE_CESIUM.value:
-            return view_mode, MapEngine.CESIUM.value
-        if is_custom_tms_mode(view_mode):
-            return view_mode, MapEngine.OPENLAYERS.value
-        # Global is the flat map. Cesium is reserved for the Globe control -
-        # keeping it here makes Global to Globe to Global look like a no-op.
-        if requested_engine == MapEngine.CESIUM.value:
-            return view_mode, MapEngine.OPENLAYERS.value
-        return view_mode, requested_engine
-
-    if triggered == "map-engine":
-        if is_custom_tms_mode(view_mode):
-            return view_mode, MapEngine.OPENLAYERS.value
-        if (
-            view_mode == MapViewMode.GLOBE_CESIUM.value
-            and requested_engine != MapEngine.CESIUM.value
-        ):
-            return MapViewMode.GLOBAL_3857.value, requested_engine
-        return view_mode, requested_engine
-
-    if is_custom_tms_mode(view_mode):
-        return view_mode, MapEngine.OPENLAYERS.value
-    if view_mode == MapViewMode.GLOBE_CESIUM.value:
-        return view_mode, MapEngine.CESIUM.value
-    return view_mode, requested_engine
+    return view_mode, resolve_engine_for_mode(view_mode)
 
 
 def collection_fits_view_mode(collection, mode: str) -> bool:
