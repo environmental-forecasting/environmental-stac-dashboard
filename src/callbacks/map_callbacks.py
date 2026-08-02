@@ -21,8 +21,10 @@ from stac.process import STAC
 from stac.timefmt import (
     date_picker_to_reference_time,
     format_slider_label,
+    format_valid_time,
     parse_calendar_day,
     parse_stac_datetime,
+    step_unit_subtitle,
     to_calendar_day,
 )
 
@@ -510,35 +512,58 @@ def register_callbacks(app: dash.Dash):
         return options, options[0]["value"]
 
     @app.callback(
-        Output("time-slider-div", "style"),
+        Output("time-slider-div", "className"),
         Output("selected-time", "children"),
+        Output("leadtime-step-subtitle", "children"),
         Output("leadtime-slider", "min"),
         Output("leadtime-slider", "max"),
         Output("leadtime-slider", "marks"),
+        Output("leadtime-slider", "value"),
+        Output("leadtime-bounds", "data"),
+        Output("leadtime-step-unit", "data"),
+        Output("leadtime-playing", "data", allow_duplicate=True),
+        Output("leadtime-play-interval", "disabled", allow_duplicate=True),
         Input("window-width", "data"),
         Input("forecast-init-date-picker", "value"),
         Input("leadtime-slider", "value"),
         State("forecast-dates-store", "data"),
-        State("time-slider-div", "style"),
+        State("leadtime-step-unit", "data"),
         prevent_initial_call=True,
     )
     def update_leadtime_slider(
-        window_width: str,
+        window_width,
         selected_date: str,
         leadtime: int,
         forecast_dates: dict,
-        slider_style,
+        step_unit: str,
     ):
         """
         selected_date: Calendar day 'YYYY-MM-DD'.
         forecast_dates: Dict of calendar day -> forecast end calendar day.
         """
+        idle = "forecast-timeline forecast-chrome forecast-timeline--idle"
+        active = "forecast-timeline forecast-chrome"
+        step_unit = step_unit or "day"
+        triggered = callback_context.triggered_id
+
         if (
             not forecast_dates
             or not selected_date
             or selected_date not in forecast_dates
         ):
-            return no_update
+            return (
+                idle,
+                "Select a forecast start",
+                "",
+                0,
+                1,
+                [],
+                0,
+                {"min": 0, "max": 0},
+                step_unit,
+                False,
+                True,
+            )
 
         forecast_start_date = parse_calendar_day(selected_date)
         forecast_end_date = parse_calendar_day(forecast_dates[selected_date])
@@ -546,40 +571,81 @@ def register_callbacks(app: dash.Dash):
         logging.info("forecast start date: %s", forecast_start_date)
         logging.info("forecast end date: %s", forecast_end_date)
 
+        # leadtime_length end day is init+N; indices are 0..N-1.
         num_days = (forecast_end_date - forecast_start_date).days
+        if num_days < 1:
+            num_days = 1
 
-        # Account for leadtime zero-indexing
         leadtime_min = 0
         leadtime_max = num_days - 1
         leadtimes = list(range(num_days))
 
-        # # For dcc.Slider
-        # marks = {
-        #     idx : to_calendar_day(forecast_start_date + timedelta(days=idx)) for idx in leadtimes
-        # }
-
-        # # For dash mantine slider
-        # Dynamically calculate step size based on window width
-        desired_marks = max(2, window_width // 100)
+        width = int(window_width or 1200)
+        desired_marks = max(2, width // 100)
         step = max(1, math.ceil(len(leadtimes) / desired_marks))
 
         marks = [
             {
                 "value": idx,
                 "label": format_slider_label(
-                    forecast_start_date + timedelta(days=idx)
+                    forecast_start_date + timedelta(days=idx),
+                    step_unit=step_unit,
                 ),
             }
             for idx in leadtimes[::step]
         ]
 
-        current_label = to_calendar_day(
-            forecast_start_date + timedelta(days=leadtime)
-        )
-        current_leadtime = f"Selected Leadtime: {current_label}"
+        if triggered == "forecast-init-date-picker":
+            next_value = 0
+            pause = True
+            value_out = next_value
+        elif triggered == "leadtime-slider":
+            current = 0 if leadtime is None else int(leadtime)
+            next_value = max(leadtime_min, min(current, leadtime_max))
+            pause = False
+            # Avoid rewriting the scrubber on its own Input - that re-triggers
+            # pause-on-scrub and cancels playback after each Interval tick.
+            value_out = no_update if next_value == current else next_value
+        else:
+            current = 0 if leadtime is None else int(leadtime)
+            next_value = max(leadtime_min, min(current, leadtime_max))
+            pause = False
+            value_out = next_value
 
-        slider_style["display"] = "inline-block"
-        return slider_style, current_leadtime, leadtime_min, leadtime_max, marks
+        valid = format_valid_time(
+            forecast_start_date + timedelta(days=next_value),
+            step_unit=step_unit,
+        )
+        subtitle = step_unit_subtitle(step_unit)
+        bounds = {"min": leadtime_min, "max": leadtime_max}
+
+        if pause:
+            return (
+                active,
+                valid,
+                subtitle,
+                leadtime_min,
+                leadtime_max,
+                marks,
+                value_out,
+                bounds,
+                step_unit,
+                False,
+                True,
+            )
+        return (
+            active,
+            valid,
+            subtitle,
+            leadtime_min,
+            leadtime_max,
+            marks,
+            value_out,
+            bounds,
+            step_unit,
+            no_update,
+            no_update,
+        )
 
     @app.callback(
         Output("map-state", "data"),
