@@ -9,6 +9,7 @@ from .projections import (
     is_custom_tms_mode,
     label_for_view_mode,
     list_view_mode_options,
+    list_view_mode_presets,
     normalise_view_mode,
     proj4_for_epsg,
     resolve_mode_and_engine,
@@ -19,7 +20,7 @@ from .projections import (
     view_mode_and_hint,
 )
 from .state import build_map_state, initial_map_state
-from .tile_urls import build_cog_tile_url
+from .tile_urls import build_cog_tile_url, rewrite_layer_entries_tms
 from .tms_client import (
     clear_tile_grid_cache,
     get_tile_grid,
@@ -43,11 +44,13 @@ __all__ = [
     "label_for_view_mode",
     "list_custom_epsg_tms_ids",
     "list_view_mode_options",
+    "list_view_mode_presets",
     "normalise_view_mode",
     "proj4_for_epsg",
     "resolve_mode_and_engine",
     "resolve_engine_for_mode",
     "resolve_view_mode",
+    "rewrite_layer_entries_tms",
     "tile_grid_from_tms",
     "tile_matrix_set_for_mode",
     "to_tiler_asset_url",

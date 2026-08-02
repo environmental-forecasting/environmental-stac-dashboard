@@ -50,6 +50,56 @@
     return tilesReady;
   }
 
+  function engineForMode(mode) {
+    if (mode === "globe_cesium") {
+      return "cesium";
+    }
+    if (mode === "global_leaflet") {
+      return "leaflet_legacy";
+    }
+    return "openlayers";
+  }
+
+  function tmsForMode(mode) {
+    if (
+      mode === "global_3857" ||
+      mode === "global_leaflet" ||
+      mode === "globe_cesium" ||
+      !mode
+    ) {
+      return "WebMercatorQuad";
+    }
+    if (/^EPSG\d+$/.test(mode)) {
+      return mode;
+    }
+    return "WebMercatorQuad";
+  }
+
+  function rewriteLayersTms(layers, tileMatrixSet) {
+    if (!layers || !layers.length || !tileMatrixSet) {
+      return layers || [];
+    }
+    var out = [];
+    var i;
+    for (i = 0; i < layers.length; i += 1) {
+      var layer = layers[i];
+      if (!layer || typeof layer.tileUrl !== "string") {
+        out.push(layer);
+        continue;
+      }
+      var nextUrl = layer.tileUrl.replace(
+        /(\/cog\/tiles\/)([^/]+)(\/)/,
+        "$1" + tileMatrixSet + "$3"
+      );
+      out.push(Object.assign({}, layer, { tileUrl: nextUrl }));
+    }
+    return out;
+  }
+
+  function projectionOf(state) {
+    return (state && state.view && state.view.projection) || "";
+  }
+
   function applyState(state) {
     if (!state) {
       return;
@@ -57,6 +107,7 @@
     if (state.revision === lastRevision) {
       return;
     }
+    var previous = lastState;
     lastRevision = state.revision;
     // Keep a copy for optimistic engine switches (before Python round-trips).
     lastState = state;
@@ -64,6 +115,28 @@
     var engine = state.engine || "openlayers";
     activeEngine = engine;
     var layers = state.layers || [];
+    var sameCamera =
+      previous &&
+      (previous.engine || "openlayers") === engine &&
+      (previous.mode || "") === (state.mode || "") &&
+      projectionOf(previous) === projectionOf(state);
+
+    // Same projection/engine: only swap overlay URLs (preserve camera / zoom).
+    if (
+      sameCamera &&
+      engine === "openlayers" &&
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.applyLeadtime === "function"
+    ) {
+      if (layers.length) {
+        setTilesReady(false);
+      } else {
+        setTilesReady(true);
+      }
+      global.ForecastMapOpenLayers.applyLeadtime(layers);
+      return;
+    }
+
     var leafletHost = document.getElementById("forecast-map-leaflet");
     var globeHost = document.getElementById("forecast-map-globe");
     var olHost = document.getElementById("forecast-map-ol");
@@ -148,9 +221,45 @@
     );
   }
 
+  /**
+   * Apply a view-mode change immediately (engine + TMS rewrite + view preset).
+   *
+   * ``presets`` is ``{ mode: viewHint }`` from the Dash store, including polar
+   * tile-grid hints so Arctic/Antarctic do not wait on Python.
+   */
+  function applyViewMode(mode, presets) {
+    if (!mode || !lastState) {
+      return;
+    }
+    if (mode === (lastState.mode || "")) {
+      // Same mode: still allow engine-only recovery.
+      applyEngine(engineForMode(mode));
+      return;
+    }
+    var engine = engineForMode(mode);
+    var tms = tmsForMode(mode);
+    var view = null;
+    if (presets && presets[mode]) {
+      view = presets[mode];
+    } else if (lastState.view && tms === "WebMercatorQuad") {
+      view = lastState.view;
+    }
+    var next = Object.assign({}, lastState, {
+      engine: engine,
+      mode: mode,
+      layers: rewriteLayersTms(lastState.layers || [], tms),
+      revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
+    });
+    if (view) {
+      next.view = view;
+    }
+    applyState(next);
+  }
+
   global.ForecastMap = {
     applyState: applyState,
     applyEngine: applyEngine,
+    applyViewMode: applyViewMode,
     setTilesReady: setTilesReady,
     isTilesReady: isTilesReady,
   };

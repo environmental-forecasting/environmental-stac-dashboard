@@ -203,6 +203,27 @@ def list_view_mode_options(tiler_url: str) -> list[dict[str, str]]:
     return options
 
 
+def list_view_mode_presets(tiler_url: str) -> dict[str, dict[str, Any]]:
+    """
+    Build ``{mode: view_hint}`` presets for optimistic client-side switches.
+
+    Polar modes include TiTiler tile-grid hints so the browser can change
+    projection without waiting for ``update_cog_layer``.
+
+    Args:
+        tiler_url: TiTiler base URL used to resolve custom TMS grids.
+
+    Returns:
+        Mapping of view-mode id to OpenLayers / Cesium view hint dict.
+    """
+    presets: dict[str, dict[str, Any]] = {}
+    for option in list_view_mode_options(tiler_url):
+        mode = option["value"]
+        _resolved, hint = view_mode_and_hint(mode, tiler_url)
+        presets[mode] = hint
+    return presets
+
+
 def resolve_view_mode(mode: str | None, tiler_url: str) -> str:
     """
     Resolve a requested view mode against TiTiler-registered matrices.

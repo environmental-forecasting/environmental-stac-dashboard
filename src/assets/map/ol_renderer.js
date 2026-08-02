@@ -140,6 +140,14 @@
       layers: [basemapLayer],
       view: createGlobalView({ center: [0, 0], zoom: 0 }),
     });
+    // User navigation cancels any deferred world-fit so leadtime / resize
+    // cannot yank the camera back out to the default extent.
+    map.on("pointerdrag", clearPendingFit);
+    var viewport = map.getViewport();
+    if (viewport) {
+      viewport.addEventListener("wheel", clearPendingFit, { passive: true });
+      viewport.addEventListener("dblclick", clearPendingFit);
+    }
     // Sidebar open/close changes the host size without a map-state bump.
     if (typeof ResizeObserver !== "undefined") {
       var resizeObserver = new ResizeObserver(function () {
@@ -185,11 +193,17 @@
     return new ol.View(options);
   }
 
+  function clearPendingFit() {
+    pendingFitExtent = null;
+  }
+
   function fitViewExtent(olView, extent) {
     if (!olView || !extent || !mapHasSize()) {
       return;
     }
     olView.fit(extent, { size: map.getSize(), padding: [20, 20, 20, 20] });
+    // Successful fit: do not re-apply on later resize / leadtime ticks.
+    pendingFitExtent = null;
   }
 
   function setBasemap(basemap, showBasemap) {
@@ -238,10 +252,8 @@
     var gridChanged = previousTileGrid !== currentTileGrid;
 
     if (!projectionChanged) {
-      if (fitExtent) {
-        pendingFitExtent = fitExtent;
-        fitViewExtent(map.getView(), fitExtent);
-      }
+      // Keep the user's centre/zoom across leadtime and style updates.
+      // Re-fitting here was resetting Global to the full world on every tick.
       if (gridChanged) {
         refreshOverlaySources();
       }
@@ -249,7 +261,7 @@
     }
 
     currentProjection = projectionCode;
-    pendingFitExtent = null;
+    clearPendingFit();
 
     var nextView;
     if (view.fit) {
@@ -367,6 +379,24 @@
     });
   }
 
+  /**
+   * Swap forecast overlay URLs for a new leadtime without changing view or
+   * basemap. Used so scrub/play keep the user's zoom and centre.
+   */
+  function applyLeadtime(layers) {
+    if (!ensureMap()) {
+      if (global.ForecastMap && global.ForecastMap.setTilesReady) {
+        global.ForecastMap.setTilesReady(true);
+      }
+      return;
+    }
+    var generation = (applyGeneration += 1);
+    syncLayers(layers || []);
+    // Do not wait on rendercomplete for leadtime ticks - that stalls Play when
+    // the event is missed while next/prev still move the slider.
+    markTilesReady(generation);
+  }
+
   function applyState(state) {
     if (!state || state.engine !== "openlayers") {
       setHostVisible(false);
@@ -379,6 +409,16 @@
     var generation = (applyGeneration += 1);
     if (!mapHasSize()) {
       map.updateSize();
+    }
+    var nextProjection = state.view && state.view.projection;
+    var projectionUnchanged =
+      currentProjection && nextProjection && nextProjection === currentProjection;
+    if (projectionUnchanged) {
+      // Leadtime / style / TMS confirmation: swap overlays only.
+      setBasemap(state.basemap, state.view && state.view.showBasemap);
+      syncLayers(state.layers);
+      markTilesReady(generation);
+      return;
     }
     applyView(state.view);
     setBasemap(state.basemap, state.view && state.view.showBasemap);
@@ -401,5 +441,6 @@
 
   global.ForecastMapOpenLayers = {
     applyState: applyState,
+    applyLeadtime: applyLeadtime,
   };
 })(window);

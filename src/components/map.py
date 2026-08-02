@@ -56,6 +56,7 @@ leaflet_map = html.Div(
         dcc.Store(id="fix-colorbar-range", data=None),
         dcc.Store(id="rescale-store", data=None),
         dcc.Store(id="map-state", data=initial_map_state()),
+        dcc.Store(id="map-view-presets", data={}),
         dcc.Store(id="map-bridge-tick", data=0),
     ],
 )

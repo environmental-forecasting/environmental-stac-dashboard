@@ -36,8 +36,10 @@ from map import (
     build_cog_tile_url,
     build_map_state,
     list_view_mode_options,
+    list_view_mode_presets,
     resolve_mode_and_engine,
     resolve_engine_for_mode,
+    rewrite_layer_entries_tms,
     tile_matrix_set_for_mode,
     to_tiler_asset_url,
     view_mode_and_hint,
@@ -323,24 +325,19 @@ def register_callbacks(app: dash.Dash):
         Input("map-state", "data"),
     )
 
-    # Optimistic host switch from view mode (do not wait on Python round-trip).
+    # Optimistic view-mode switch (engine + TMS + projection; no Python wait).
     app.clientside_callback(
         """
-        function(mode) {
-            var engine = "openlayers";
-            if (mode === "globe_cesium") {
-                engine = "cesium";
-            } else if (mode === "global_leaflet") {
-                engine = "leaflet_legacy";
-            }
-            if (window.ForecastMap && typeof window.ForecastMap.applyEngine === "function") {
-                window.ForecastMap.applyEngine(engine);
+        function(mode, presets) {
+            if (window.ForecastMap && typeof window.ForecastMap.applyViewMode === "function") {
+                window.ForecastMap.applyViewMode(mode, presets || {});
             }
             return window.dash_clientside.no_update;
         }
         """,
         Output("map-bridge-tick", "data", allow_duplicate=True),
         Input("map-view-mode", "value"),
+        State("map-view-presets", "data"),
         prevent_initial_call=True,
     )
 
@@ -574,12 +571,16 @@ def register_callbacks(app: dash.Dash):
 
     @app.callback(
         Output("map-view-mode", "options"),
+        Output("map-view-presets", "data"),
         Input("page-load-trigger", "data"),
         prevent_initial_call=False,
     )
     def update_map_view_mode_options(_):
         """Populate Global / Leaflet / Globe + custom EPSG#### views."""
-        return list_view_mode_options(TILER_INTERNAL_URL)
+        return (
+            list_view_mode_options(TILER_INTERNAL_URL),
+            list_view_mode_presets(TILER_INTERNAL_URL),
+        )
 
     @app.callback(
         [
@@ -980,6 +981,28 @@ def register_callbacks(app: dash.Dash):
                 view_mode=mode,
             )
 
+        # TMS / view-mode switch: rewrite TileMatrixSet on existing URLs.
+        # Skip STAC walks, extent filtering, and TiTiler statistics so the
+        # control feels instant (client already applied an optimistic state).
+        if triggered == "map-view-mode":
+            previous_layers = (map_state or {}).get("layers") or []
+            rewritten = rewrite_layer_entries_tms(
+                previous_layers, tile_matrix_set
+            )
+            if rewritten is not None:
+                return _publish(rewritten, no_update)
+            if (
+                isinstance(rescale_store, dict)
+                and "min" in rescale_store
+                and "max" in rescale_store
+            ):
+                layer_entries = _layers_for_scale(
+                    rescale_store["min"], rescale_store["max"]
+                )
+                if layer_entries:
+                    return _publish(layer_entries, no_update)
+                return _publish([], no_update)
+
         # Colour map only: rebuild tile URLs from the stored range.
         if (
             triggered == "colormap-dropdown"
@@ -1072,8 +1095,8 @@ def register_callbacks(app: dash.Dash):
                 continue
 
         if not layer_specs or not min_vals:
-            # View-mode / engine change may leave no fitting layers; still update the host.
-            if triggered in control_triggers:
+            # View-mode change may leave no fitting layers; still update the host.
+            if triggered == "map-view-mode":
                 return _publish([], no_update)
             return no_update, no_update, no_update, no_update
 
@@ -1094,7 +1117,7 @@ def register_callbacks(app: dash.Dash):
             view_mode=mode,
         )
         if not layer_entries:
-            if triggered in control_triggers:
+            if triggered == "map-view-mode":
                 return _publish([], no_update)
             return no_update, no_update, no_update, no_update
 
