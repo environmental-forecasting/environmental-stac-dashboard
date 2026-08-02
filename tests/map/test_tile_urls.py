@@ -147,7 +147,7 @@ def test_view_hint_for_custom_mode_requires_tile_grid():
     grid = tile_grid_from_tms(_sample_polar_tms())
     hint = view_hint_for_mode("EPSG6931", tile_grid=grid)
     assert hint["projection"] == "EPSG:6931"
-    assert hint["showBasemap"] is True
+    assert hint["showBasemap"] is False
     assert hint["fit"] is True
     assert hint["extent"] == grid["extent"]
     assert hint["proj4"]
@@ -166,7 +166,8 @@ def test_view_hint_for_global_shows_basemap():
     hint = view_hint_for_mode(MapViewMode.GLOBAL_3857)
     assert hint["projection"] == "EPSG:3857"
     assert hint["showBasemap"] is True
-    assert hint["fit"] is True
+    assert hint["fit"] is False
+    assert hint["zoom"] == 2
     assert hint["showFullExtent"] is True
     assert hint["multiWorld"] is True
     assert hint["minZoom"] == 0

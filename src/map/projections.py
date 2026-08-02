@@ -273,16 +273,18 @@ def view_hint_for_mode(
             "extent": list(tile_grid["extent"]),
             "origin": list(tile_grid["origin"]),
             "resolutions": list(tile_grid["resolutions"]),
-            # OSM stays Web Mercator; OpenLayers reprojects it into this view.
-            "showBasemap": True,
+            # OSM is Web Mercator; reprojecting it into EASE makes a doughnut
+            # around the pole. Polar modes show the forecast grid alone.
+            "showBasemap": False,
             "fit": True,
         }
     return {
         "projection": "EPSG:3857",
         "center": [0, 0],
+        # Match Leaflet's default zoom; multiWorld lets overlays repeat on X.
+        "zoom": 2,
         "showBasemap": True,
-        # Fit the full Mercator world on entry (same idea as polar defaults).
-        "fit": True,
+        "fit": False,
         "showFullExtent": True,
         "multiWorld": True,
         "minZoom": 0,

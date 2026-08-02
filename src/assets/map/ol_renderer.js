@@ -13,10 +13,51 @@
   var registeredProj4 = {};
   // Extent to fit again once the map has a real size on screen.
   var pendingFitExtent = null;
+  // Overlays added while size was 0 need a source refresh once layout runs.
+  var overlaysAwaitingSize = false;
   var applyGeneration = 0;
 
   function getHost() {
     return document.getElementById(HOST_ID);
+  }
+
+  function mapHasSize() {
+    var size = map && map.getSize();
+    return !!(size && size[0] && size[1]);
+  }
+
+  function layerSourceUrl(layer) {
+    var source = layer && layer.getSource && layer.getSource();
+    if (!source) {
+      return null;
+    }
+    if (source.getUrls) {
+      return source.getUrls()[0];
+    }
+    return source.getUrl && source.getUrl();
+  }
+
+  function refreshOverlaySources() {
+    Object.keys(forecastLayersById).forEach(function (layerId) {
+      var layer = forecastLayersById[layerId];
+      var url = layerSourceUrl(layer);
+      if (url) {
+        layer.setSource(createXyzSource(url, currentTileGrid));
+      }
+    });
+  }
+
+  /** Remeasure and apply a pending fit only when the host has a real size. */
+  function tryPendingFit() {
+    if (!map || !pendingFitExtent) {
+      return;
+    }
+    map.updateSize();
+    if (!mapHasSize()) {
+      return;
+    }
+    fitViewExtent(map.getView(), pendingFitExtent);
+    pendingFitExtent = null;
   }
 
   function registerProjection(code, proj4Def, extent) {
@@ -102,8 +143,14 @@
     // Sidebar open/close changes the host size without a map-state bump.
     if (typeof ResizeObserver !== "undefined") {
       var resizeObserver = new ResizeObserver(function () {
-        if (map) {
-          map.updateSize();
+        if (!map) {
+          return;
+        }
+        map.updateSize();
+        tryPendingFit();
+        if (overlaysAwaitingSize && mapHasSize()) {
+          overlaysAwaitingSize = false;
+          refreshOverlaySources();
         }
       });
       resizeObserver.observe(host);
@@ -126,8 +173,7 @@
       projection: projectionCode,
       center: ol.proj.fromLonLat(center, projectionCode),
       zoom: view && view.zoom != null ? view.zoom : 0,
-      // Allow zooming out until the full Mercator square is visible (tall
-      // dashboard layouts otherwise clamp before the poles fit).
+      // Allow zooming out past one world so forecast overlays can repeat on X.
       multiWorld: view && view.multiWorld === false ? false : true,
       showFullExtent: view && view.showFullExtent === false ? false : true,
       minZoom: view && view.minZoom != null ? view.minZoom : 0,
@@ -140,14 +186,10 @@
   }
 
   function fitViewExtent(olView, extent) {
-    if (!olView || !extent) {
+    if (!olView || !extent || !mapHasSize()) {
       return;
     }
-    var size = map.getSize();
-    if (!size || !size[0] || !size[1]) {
-      return;
-    }
-    olView.fit(extent, { size: size, padding: [20, 20, 20, 20] });
+    olView.fit(extent, { size: map.getSize(), padding: [20, 20, 20, 20] });
   }
 
   function setBasemap(basemap, showBasemap) {
@@ -214,16 +256,7 @@
     }
 
     // Rebuild overlay sources so polar tiles use the matching tile grid.
-    Object.keys(forecastLayersById).forEach(function (layerId) {
-      var layer = forecastLayersById[layerId];
-      var source = layer.getSource();
-      var url = source.getUrls
-        ? source.getUrls()[0]
-        : source.getUrl && source.getUrl();
-      if (url) {
-        layer.setSource(createXyzSource(url, currentTileGrid));
-      }
-    });
+    refreshOverlaySources();
   }
 
   function syncLayers(layers) {
@@ -256,11 +289,7 @@
         continue;
       }
 
-      var source = existing.getSource();
-      var currentUrl = source.getUrls
-        ? source.getUrls()[0]
-        : source.getUrl && source.getUrl();
-      if (currentUrl !== layer.tileUrl) {
+      if (layerSourceUrl(existing) !== layer.tileUrl) {
         existing.setSource(createXyzSource(layer.tileUrl, currentTileGrid));
       }
       existing.setOpacity(layer.opacity == null ? 1 : layer.opacity);
@@ -332,16 +361,22 @@
       return;
     }
     var generation = (applyGeneration += 1);
+    if (!mapHasSize()) {
+      map.updateSize();
+    }
     applyView(state.view);
     setBasemap(state.basemap, state.view && state.view.showBasemap);
     syncLayers(state.layers);
-    // Retry a pending world/polar fit once the host has a real size.
-    if (pendingFitExtent) {
-      map.updateSize();
-      fitViewExtent(map.getView(), pendingFitExtent);
-      pendingFitExtent = null;
-    }
+    tryPendingFit();
+    // Tiles requested at 0x0 stay cached for the same z/x/y after layout.
+    // Flag that case and refresh once ResizeObserver (or a later apply) has size.
     if (state.layers && state.layers.length) {
+      if (!mapHasSize()) {
+        overlaysAwaitingSize = true;
+      } else if (overlaysAwaitingSize) {
+        overlaysAwaitingSize = false;
+        refreshOverlaySources();
+      }
       waitForTiles(generation);
     } else {
       markTilesReady(generation);
