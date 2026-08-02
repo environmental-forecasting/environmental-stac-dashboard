@@ -35,6 +35,7 @@ from map import (
     build_map_state,
     list_map_engine_options,
     list_view_mode_options,
+    map_engine_hint,
     resolve_mode_and_engine,
     resolve_engine_for_mode,
     tile_matrix_set_for_mode,
@@ -353,12 +354,16 @@ def register_callbacks(app: dash.Dash):
 
     @app.callback(
         Output("map-engine", "options"),
-        Input("page-load-trigger", "data"),
+        Output("map-engine-hint", "children"),
+        Input("map-view-mode", "value"),
         prevent_initial_call=False,
     )
-    def update_map_engine_options(_):
-        """Populate OpenLayers / Cesium / Leaflet engine choices."""
-        return list_map_engine_options()
+    def update_map_engine_options(map_view_mode: str):
+        """Disable renderers that cannot show the active view."""
+        return (
+            list_map_engine_options(map_view_mode),
+            map_engine_hint(map_view_mode),
+        )
 
     @app.callback(
         [
@@ -446,18 +451,22 @@ def register_callbacks(app: dash.Dash):
 
     @app.callback(
         Output("variable-dropdown", "options"),
+        Output("variable-dropdown", "value"),
         Input("forecast-init-date-picker", "value"),
         Input("collections-dropdown", "value"),
+        State("variable-dropdown", "value"),
         prevent_initial_call=True,
     )
-    def update_available_variables(selected_date, collection_ids: list):
+    def update_available_variables(selected_date, collection_ids: list, current_value):
         """
         Update the variable dropdown from the selected forecast Item.
 
-        Band names are read from the first COG asset on the cached Item.
+        Band names are read from the first COG asset on the cached Item. On the
+        first load (or when the current choice is no longer available), select
+        the first variable automatically.
         """
         if not selected_date or not collection_ids:
-            return []
+            return [], None
 
         stac = _get_stac_client()
         forecast_reference_time_str = date_picker_to_reference_time(selected_date)
@@ -489,12 +498,16 @@ def register_callbacks(app: dash.Dash):
                 continue
 
         if not combined_vars:
-            return []
+            return [], None
 
-        return [
+        options = [
             {"label": var_name, "value": band_index}
             for var_name, band_index in combined_vars.items()
         ]
+        values = {opt["value"] for opt in options}
+        if current_value in values:
+            return options, no_update
+        return options, options[0]["value"]
 
     @app.callback(
         Output("time-slider-div", "style"),
@@ -802,56 +815,48 @@ def register_callbacks(app: dash.Dash):
         return rescale_store["min"], rescale_store["max"]
 
     @app.callback(
-        Output("cbar", "colorscale"),
-        Output("cbar", "min"),
-        Output("cbar", "max"),
         Output("forecast-cbar-ramp", "style"),
         Output("forecast-cbar-min", "children"),
         Output("forecast-cbar-max", "children"),
-        Input("cbar", "colorscale"),
         Input("colormap-dropdown", "value"),
         Input("fixed-min", "value"),
         Input("fixed-max", "value"),
         prevent_initial_call=True,
     )
-    def show_cbar(colorscale, colormap, min_val, max_val):
+    def show_cbar(colormap, min_val, max_val):
+        """Update the shared timeline colourbar from colormap and min/max."""
         colorscale = (
-            convert_colormap_to_colorscale(colormap) if colormap else colorscale
+            convert_colormap_to_colorscale(colormap) if colormap else []
         )
         if not (
             isinstance(min_val, (int, float)) and isinstance(max_val, (int, float))
         ):
             min_val, max_val = 0, 1
-        # HTML colourbar for OpenLayers (Leaflet still uses dl.Colorbar).
         ramp_colors = colorscale if isinstance(colorscale, list) and colorscale else []
         ramp_style = {
             "background": (
-                f"linear-gradient(to top, {', '.join(ramp_colors)})"
+                f"linear-gradient(to right, {', '.join(ramp_colors)})"
                 if ramp_colors
                 else None
             ),
         }
-        return colorscale, min_val, max_val, ramp_style, str(min_val), str(max_val)
+        return ramp_style, str(min_val), str(max_val)
 
     @app.callback(
-        Output("controls", "style"),
-        Input("controls-btn", "n_clicks"),
-        State("controls", "style"),
+        Output("controls-column", "className"),
+        Output("controls-open", "data"),
+        Output("controls-seam-icon", "icon"),
+        Input("controls-seam", "n_clicks"),
+        State("controls-open", "data"),
         prevent_initial_call=True,
     )
-    def toggle_main_controller(n_clicks, current_style):
-        """
-        Callback to toggle main controls div visibility
-        """
-        if not current_style:
-            current_style = {}
-
-        current_display = current_style.get("display", "inline-block")
-        new_display = "none" if current_display == "inline-block" else "inline-block"
-        new_style = current_style.copy()
-        new_style["display"] = new_display
-
-        return new_style
+    def toggle_main_controller(_seam, is_open):
+        """Toggle the right-hand controls column without covering the map."""
+        opened = not bool(is_open)
+        base = "forecast-controls-column"
+        class_name = base if opened else f"{base} forecast-controls-column--collapsed"
+        icon = "tabler:chevron-right" if opened else "tabler:chevron-left"
+        return class_name, opened, icon
 
     @app.callback(
         Output("fix-colorbar-button", "style"),
@@ -886,18 +891,16 @@ def register_callbacks(app: dash.Dash):
             - In auto mode, min/max are filled from rescale-store (Item STATISTICS_* or TiTiler fallback).
         """
         is_fixed = n_clicks % 2 == 1
-        # Colour for enabled state
-        theme_colour = "#3B71CA"
         style = {
-            "backgroundColor": theme_colour if is_fixed else "#f0f0f0",
-            "border": "none",
-            "padding": "10px",
-            "borderRadius": "5px",
+            "backgroundColor": "#3d7ab5" if is_fixed else "rgba(255, 255, 255, 0.08)",
+            "border": "1px solid rgba(255, 255, 255, 0.14)",
+            "padding": "8px 10px",
+            "borderRadius": "6px",
             "cursor": "pointer",
             "width": "100%",
             "marginBottom": "10px",
-            "fontWeight": "bold",
-            "color": "white" if is_fixed else "#333",
+            "fontWeight": "500",
+            "color": "#e8ecf4",
         }
         disabled_inputs = False if is_fixed else True
 

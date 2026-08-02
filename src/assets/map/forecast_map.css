@@ -1,8 +1,179 @@
-/* Forecast map hosts: OpenLayers default, Cesium globe, Leaflet. */
+/* App shell: compact header/footer, map column + controls column.
+   Shared chrome fills header / sidebar / timeline / footer as one frame.
+   Shell gradient: black to very dark blue. */
+.app-shell {
+  --shell-top: #000000;
+  --shell-bottom: #001435;
+  --shell-gradient: linear-gradient(
+    to bottom,
+    var(--shell-top) 0%,
+    #01040c 35%,
+    #001435 70%,
+    var(--shell-bottom) 100%
+  );
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--shell-gradient);
+  color: #e0e0e0;
+}
+
+/* Same viewport-fixed gradient on chrome so header/sidebar/footer match. */
+.app-shell__header,
+.app-shell__footer,
+.forecast-chrome,
+.forecast-controls-column,
+.forecast-controls-seam {
+  background: var(--shell-gradient);
+  background-attachment: fixed;
+  border: none;
+  box-shadow: none;
+}
+
+.app-shell__header {
+  flex: 0 0 auto;
+}
+
+.app-shell__header .navbar,
+.app-shell__header .navbar.bg-black,
+.app-shell__header .navbar.bg-dark {
+  min-height: 0;
+  padding-top: 0.15rem;
+  padding-bottom: 0.15rem;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-bottom: none !important;
+  box-shadow: none !important;
+}
+
+.app-shell__header .container,
+.app-shell__header .container-fluid {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.app-shell__main {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  overflow: hidden;
+  position: relative;
+  background: transparent;
+}
+
+.site-footer--compact .bsk-footer {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center;
+  width: 100% !important;
+  min-height: 2.25rem !important;
+  height: auto !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  color: #e0e0e0;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.app-shell__footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  color: #e0e0e0;
+}
+
+.site-footer--compact {
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.site-footer--compact a {
+  color: #c5cede;
+}
+
+.site-footer--compact a:hover {
+  color: #fff;
+}
+
+/* Same centred Bootstrap container as the header navbar. */
+.site-footer__inner.container {
+  display: flex !important;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.35rem 1rem;
+  padding-top: 0.45rem !important;
+  padding-bottom: 0.45rem !important;
+  font-size: 0.875rem;
+  line-height: 1.3;
+}
+
+.site-footer--compact .bsk-footer-governance {
+  margin: 0 !important;
+  text-align: left;
+  min-width: 0;
+}
+
+.site-footer--compact .bsk-footer-policy-links {
+  margin: 0 !important;
+}
+
+.site-footer__links {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.site-footer__year {
+  opacity: 0.75;
+}
+
+/* Dark glass (floating chrome on the map face). */
+.forecast-glass {
+  background: rgba(18, 22, 32, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: #e8ecf4;
+}
+
+/* Shell chrome: timeline + seam + sidebar share the shell gradient. */
+.forecast-chrome {
+  color: #e8ecf4;
+}
+
+.forecast-map-column {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.forecast-map-column__map {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
 
 .forecast-map-root {
-  width: inherit;
-  height: inherit;
+  width: 100%;
+  height: 100%;
   position: relative;
 }
 
@@ -25,14 +196,8 @@
   z-index: 0;
 }
 
-#forecast-map-ol {
-  z-index: 1;
-}
-
-#forecast-map-globe {
-  z-index: 1;
-}
-
+#forecast-map-ol,
+#forecast-map-globe,
 #forecast-map-leaflet {
   z-index: 1;
 }
@@ -43,7 +208,6 @@
   z-index: 2;
 }
 
-/* Cesium fills its host. */
 #forecast-map-globe .cesium-viewer,
 #forecast-map-globe .cesium-viewer-cesiumWidgetContainer,
 #forecast-map-globe .cesium-widget,
@@ -52,59 +216,370 @@
   height: 100%;
 }
 
-.forecast-map-settings-btn {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 1000;
-  width: 36px;
-  height: 36px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.9);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-}
-
-.forecast-map-settings-btn:hover {
-  background: #fff;
-}
-
-.forecast-map-mode-controls {
+.forecast-map-view-mode-wrap {
   position: absolute;
   top: 12px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
+  max-width: calc(100% - 24px);
+  border-radius: 999px;
+  padding: 3px;
+}
+
+.forecast-map-view-mode {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  margin: 0;
 }
 
-.forecast-map-view-mode,
-.forecast-map-engine {
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  padding: 4px 10px;
-}
-
-.forecast-map-view-mode label,
-.forecast-map-engine label {
-  margin-right: 12px;
+.forecast-map-view-mode label {
+  margin: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
   font-size: 13px;
-  color: #333;
+  color: #c5cede;
+  cursor: pointer;
+  user-select: none;
+}
+
+.forecast-map-view-mode label:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.forecast-map-view-mode input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.forecast-map-view-mode label:has(> input:checked) {
+  background: #3d7ab5;
+  color: #fff;
+}
+
+/* Controls column + seam. */
+.forecast-controls-seam {
+  flex: 0 0 22px;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  color: #c5cede;
+  z-index: 2;
+}
+
+.forecast-controls-seam:hover {
+  filter: brightness(1.08);
+  color: #fff;
+}
+
+.forecast-controls-column {
+  flex: 0 0 320px;
+  width: 320px;
+  min-width: 320px;
+  max-width: 320px;
+  min-height: 0;
+  overflow: hidden;
+  transition: flex-basis 0.2s ease, width 0.2s ease, min-width 0.2s ease,
+    max-width 0.2s ease, opacity 0.2s ease;
+  opacity: 1;
+}
+
+.forecast-controls-column--collapsed {
+  flex-basis: 0;
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.forecast-controls-panel {
+  box-sizing: border-box;
+  width: 320px;
+  height: 100%;
+  overflow: auto;
+  padding: 12px 14px 16px;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+}
+
+.forecast-controls__header {
+  margin-bottom: 10px;
+}
+
+.forecast-controls__title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.forecast-controls-panel label {
+  display: block;
+  margin-top: 10px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #9aa6bc;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.forecast-controls-panel label:first-of-type {
+  margin-top: 0;
+}
+
+.forecast-controls__minmax {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.forecast-controls__number {
+  width: 100%;
+  border-radius: 6px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.25);
+  color: #e8ecf4;
+}
+
+.forecast-controls__action {
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8ecf4;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
 }
 
-.forecast-map-view-mode label:last-child,
-.forecast-map-engine label:last-child {
-  margin-right: 0;
+.forecast-controls__action:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 
-/* Keep Cesium chrome clear of the settings button (top-left). */
+.forecast-map-engine {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.forecast-map-engine label {
+  margin: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  color: #d5dceb;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+.forecast-map-engine label:has(input:disabled) {
+  color: #6b7588;
+  cursor: not-allowed;
+}
+
+.forecast-map-engine-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #8b96ab;
+  min-height: 1em;
+}
+
+/* Fixed-height timeline below the map - joins seam/sidebar/footer. */
+.forecast-timeline {
+  flex: 0 0 96px;
+  height: 96px;
+  max-height: 96px;
+  box-sizing: border-box;
+  padding: 8px 14px 10px;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 3;
+}
+
+.forecast-timeline--idle .forecast-timeline__scrubber,
+.forecast-timeline--idle .forecast-timeline__transport,
+.forecast-timeline--idle .forecast-timeline__right {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.forecast-timeline__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+}
+
+.forecast-timeline__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+.forecast-timeline__labels {
+  min-width: 0;
+}
+
+.forecast-timeline__valid {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f2f5fb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-timeline__subtitle {
+  font-size: 11px;
+  color: #8b96ab;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-timeline__transport {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.forecast-timeline__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e8ecf4;
+  cursor: pointer;
+  padding: 0;
+}
+
+.forecast-timeline__btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.forecast-timeline__btn--play {
+  width: 38px;
+  height: 38px;
+  background: rgba(61, 122, 181, 0.35);
+  border-color: rgba(61, 122, 181, 0.55);
+}
+
+.forecast-timeline__btn--play.is-playing {
+  background: rgba(61, 122, 181, 0.55);
+}
+
+.forecast-timeline__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 220px;
+  justify-content: flex-end;
+}
+
+.forecast-timeline__pace-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b96ab;
+}
+
+.forecast-timeline__pace {
+  display: flex;
+  gap: 2px;
+  margin: 0;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.forecast-timeline__pace label {
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #c5cede;
+  cursor: pointer;
+}
+
+.forecast-timeline__pace label:has(> input:checked) {
+  background: #3d7ab5;
+  color: #fff;
+}
+
+.forecast-timeline__pace input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.forecast-timeline__pace-custom {
+  width: 72px;
+  border-radius: 6px;
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  color: #e8ecf4;
+  font-size: 12px;
+}
+
+.forecast-timeline__scrubber {
+  flex: 1 1 auto;
+  margin: 0 4px;
+}
+
+.forecast-cbar--inline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-width: 120px;
+  max-width: 160px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.forecast-cbar__ramp {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  min-width: 64px;
+}
+
+.forecast-cbar__label {
+  font-size: 10px;
+  color: #b7c0d2;
+  min-width: 1.5em;
+  text-align: center;
+}
+
 #forecast-map-globe .cesium-viewer-toolbar {
   top: auto;
   bottom: 12px;
@@ -116,31 +591,123 @@
   left: 0;
 }
 
-.forecast-cbar {
-  position: absolute;
-  top: 60px;
-  left: 12px;
-  z-index: 1000;
-  width: 30px;
-  height: 200px;
-  padding: 10px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.8);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  box-sizing: content-box;
+/* Shared ramp lives in the timeline. */
+#forecast-map-leaflet .leaflet-control.easy-button-container {
+  display: none !important;
 }
 
-.forecast-cbar__ramp {
-  flex: 1;
+/* Shared control field look: white surface, black text, 32px row. */
+.forecast-controls-panel .dash-dropdown,
+.forecast-controls-panel .dash-dropdown-trigger,
+.forecast-controls-panel .dash-dropdown-value,
+.forecast-controls-panel .dash-dropdown-value-item,
+.forecast-controls-panel .dash-dropdown-placeholder,
+.forecast-controls-panel .dash-dropdown-option,
+.forecast-controls-panel .dash-dropdown-search,
+.forecast-controls-panel .dash-dropdown-options {
+  color: #000 !important;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.forecast-controls-panel .dash-dropdown-placeholder {
+  color: #444 !important;
+}
+
+.forecast-controls-panel .dash-dropdown,
+.forecast-controls-panel .dash-dropdown-trigger,
+.forecast-controls-panel .dash-dropdown-options,
+.forecast-controls-panel .dash-dropdown-search {
+  background: #fff !important;
+}
+
+.forecast-controls-panel .dash-dropdown {
   width: 100%;
-  border-radius: 2px;
+  border: 1px solid #c5ccd6 !important;
+  border-radius: 4px !important;
 }
 
-.forecast-cbar__label {
-  font-size: 11px;
-  color: #333;
-  text-align: center;
+.forecast-controls-panel .dash-dropdown-trigger {
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.forecast-controls-panel .dash-dropdown-option:hover,
+.forecast-controls-panel .dash-dropdown-option[data-selected="true"],
+.forecast-controls-panel .dash-dropdown-option[aria-selected="true"] {
+  background: #e8eef5 !important;
+  color: #000 !important;
+}
+
+/* Match DatePickerInput to the dropdown field chrome. */
+.forecast-controls-panel .mantine-DatePickerInput-root,
+.forecast-controls-panel .mantine-DatePickerInput-wrapper {
+  width: 100%;
+}
+
+.forecast-controls-panel .mantine-DatePickerInput-input {
+  display: flex !important;
+  align-items: center;
+  width: 100%;
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 0 12px !important;
+  border: 1px solid #c5ccd6 !important;
+  border-radius: 4px !important;
+  background: #fff !important;
+  color: #000 !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  line-height: 1.3 !important;
+  font-family: inherit !important;
+}
+
+.forecast-controls-panel .mantine-DatePickerInput-input:focus,
+.forecast-controls-panel .mantine-DatePickerInput-input[data-expanded="true"] {
+  border-color: #3d7ab5 !important;
+  outline: 1px solid #3d7ab5;
+}
+
+.forecast-controls-panel .mantine-DatePickerInput-placeholder,
+.forecast-controls-panel .mantine-DatePickerInput-input .mantine-InputPlaceholder-placeholder {
+  color: #444 !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  line-height: 1.3 !important;
+  font-family: inherit !important;
+}
+
+.forecast-controls-panel .mantine-DatePickerInput-input > span:not(.mantine-InputPlaceholder-placeholder) {
+  color: #000 !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+}
+
+/* Narrow viewports: keep flex push layout; only tighten chrome. */
+@media (max-width: 720px) {
+  .forecast-map-view-mode-wrap {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    max-width: none;
+    border-radius: 8px;
+  }
+
+  .forecast-timeline {
+    flex-basis: auto;
+    height: auto;
+    max-height: none;
+  }
+
+  .forecast-timeline__row {
+    flex-wrap: wrap;
+  }
+
+  .forecast-controls-column:not(.forecast-controls-column--collapsed) {
+    flex-basis: min(320px, 85vw);
+    width: min(320px, 85vw);
+    min-width: min(280px, 85vw);
+    max-width: min(320px, 85vw);
+  }
 }
