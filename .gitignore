@@ -162,3 +162,4 @@ cython_debug/
 #.idea/
 
 # This project specific
+bench/results/*.json
