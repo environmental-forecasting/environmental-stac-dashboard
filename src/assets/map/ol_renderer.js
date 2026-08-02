@@ -7,11 +7,13 @@
   var forecastLayersById = {};
   var map = null;
   var basemapLayer = null;
+  var basemapUrl = null;
   var currentProjection = null;
   var currentTileGrid = null;
   var registeredProj4 = {};
   // Extent to fit again once the map has a real size on screen.
   var pendingFitExtent = null;
+  var applyGeneration = 0;
 
   function getHost() {
     return document.getElementById(HOST_ID);
@@ -90,12 +92,22 @@
       }),
       zIndex: 0,
     });
+    basemapUrl = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 
     map = new ol.Map({
       target: host,
       layers: [basemapLayer],
       view: createGlobalView({ center: [0, 0], zoom: 0 }),
     });
+    // Sidebar open/close changes the host size without a map-state bump.
+    if (typeof ResizeObserver !== "undefined") {
+      var resizeObserver = new ResizeObserver(function () {
+        if (map) {
+          map.updateSize();
+        }
+      });
+      resizeObserver.observe(host);
+    }
     // Leave unset so the first applyView configures projection / fit.
     currentProjection = null;
     currentTileGrid = null;
@@ -146,6 +158,11 @@
     if (!basemap || !basemap.url || showBasemap === false) {
       return;
     }
+    // Keep the existing XYZ source when the URL is unchanged - recreating it
+    // on every leadtime tick reloads OSM and makes the basemap flicker.
+    if (basemap.url === basemapUrl) {
+      return;
+    }
     // OSM XYZ is always EPSG:3857; OL reprojects into polar/custom views.
     basemapLayer.setSource(
       new ol.source.XYZ({
@@ -155,6 +172,7 @@
         attributions: "© OpenStreetMap contributors",
       })
     );
+    basemapUrl = basemap.url;
   }
 
   function applyView(view) {
@@ -264,14 +282,44 @@
     if (!host) {
       return;
     }
+    var wasHidden = host.classList.contains("forecast-map-host--hidden");
     if (visible) {
       host.classList.remove("forecast-map-host--hidden");
-      if (map) {
+      // Only remeasure when the host was actually hidden - calling this on
+      // every leadtime tick forces a full map redraw.
+      if (wasHidden && map) {
         map.updateSize();
       }
       return;
     }
     host.classList.add("forecast-map-host--hidden");
+  }
+
+  function markTilesReady(generation) {
+    if (generation !== applyGeneration) {
+      return;
+    }
+    if (global.ForecastMap && global.ForecastMap.setTilesReady) {
+      global.ForecastMap.setTilesReady(true);
+    }
+  }
+
+  function waitForTiles(generation) {
+    if (!map) {
+      markTilesReady(generation);
+      return;
+    }
+    // Defer one frame so the new XYZ sources can queue tile requests before
+    // we arm rendercomplete (avoids an immediate "idle" complete).
+    requestAnimationFrame(function () {
+      if (generation !== applyGeneration) {
+        return;
+      }
+      map.once("rendercomplete", function () {
+        markTilesReady(generation);
+      });
+      map.render();
+    });
   }
 
   function applyState(state) {
@@ -283,16 +331,20 @@
     if (!ensureMap()) {
       return;
     }
-    // Size must be known before we can frame the full world or polar view.
-    map.updateSize();
+    var generation = (applyGeneration += 1);
     applyView(state.view);
     setBasemap(state.basemap, state.view && state.view.showBasemap);
     syncLayers(state.layers);
-    map.updateSize();
-    // The first fit may happen before the map is laid out; try once more.
+    // Retry a pending world/polar fit once the host has a real size.
     if (pendingFitExtent) {
+      map.updateSize();
       fitViewExtent(map.getView(), pendingFitExtent);
       pendingFitExtent = null;
+    }
+    if (state.layers && state.layers.length) {
+      waitForTiles(generation);
+    } else {
+      markTilesReady(generation);
     }
   }
 

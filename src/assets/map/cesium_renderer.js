@@ -10,6 +10,8 @@
   var viewer = null;
   var basemapLayer = null;
   var basemapUrl = null;
+  var applyGeneration = 0;
+  var progressListener = null;
 
   function getHost() {
     return document.getElementById(HOST_ID);
@@ -49,7 +51,7 @@
       homeButton: false,
       sceneModePicker: false,
       navigationHelpButton: false,
-      fullscreenButton: true,
+      fullscreenButton: false,
       infoBox: false,
       selectionIndicator: false,
       // Default ellipsoid only
@@ -180,6 +182,46 @@
     host.classList.add("forecast-map-host--hidden");
   }
 
+  function markTilesReady(generation) {
+    if (generation !== applyGeneration) {
+      return;
+    }
+    if (global.ForecastMap && global.ForecastMap.setTilesReady) {
+      global.ForecastMap.setTilesReady(true);
+    }
+  }
+
+  function waitForTiles(generation) {
+    if (!viewer) {
+      markTilesReady(generation);
+      return;
+    }
+    if (progressListener) {
+      viewer.scene.globe.tileLoadProgressEvent.removeEventListener(progressListener);
+      progressListener = null;
+    }
+    // Already idle (cached tiles / empty queue).
+    if (viewer.scene.globe.tilesLoaded) {
+      markTilesReady(generation);
+      return;
+    }
+    progressListener = function (remaining) {
+      if (generation !== applyGeneration) {
+        return;
+      }
+      if (remaining > 0) {
+        return;
+      }
+      if (progressListener) {
+        viewer.scene.globe.tileLoadProgressEvent.removeEventListener(progressListener);
+        progressListener = null;
+      }
+      markTilesReady(generation);
+    };
+    viewer.scene.globe.tileLoadProgressEvent.addEventListener(progressListener);
+    viewer.scene.requestRender();
+  }
+
   function applyState(state) {
     if (!state || state.engine !== "cesium") {
       setHostVisible(false);
@@ -189,9 +231,15 @@
     if (!ensureViewer()) {
       return;
     }
+    var generation = (applyGeneration += 1);
     setBasemap(state.basemap, state.view && state.view.showBasemap);
     syncLayers(state.layers);
     viewer.resize();
+    if (state.layers && state.layers.length) {
+      waitForTiles(generation);
+    } else {
+      markTilesReady(generation);
+    }
   }
 
   global.ForecastMapCesium = {

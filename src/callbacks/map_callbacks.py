@@ -325,6 +325,7 @@ def register_callbacks(app: dash.Dash):
         Input("map-state", "data"),
     )
 
+
     # Leadtime transport / pace / keyboard (clientside for snappy playback).
     # Programmatic slider writes set window.__forecastTimelineProgrammatic so
     # pause-on-scrub does not immediately cancel play/interval advances.
@@ -346,7 +347,15 @@ def register_callbacks(app: dash.Dash):
             if (current >= max) {
                 return [nu, false, true];
             }
+            // Hold the frame until the active map reports forecast tiles loaded.
+            if (window.ForecastMap && window.ForecastMap.isTilesReady
+                    && !window.ForecastMap.isTilesReady()) {
+                return [nu, true, false];
+            }
             window.__forecastTimelineProgrammatic = true;
+            if (window.ForecastMap && window.ForecastMap.setTilesReady) {
+                window.ForecastMap.setTilesReady(false);
+            }
             return [current + 1, true, false];
         }
         """,
@@ -401,6 +410,9 @@ def register_callbacks(app: dash.Dash):
             var valueOut = nu;
             if (nextValue !== current) {
                 window.__forecastTimelineProgrammatic = true;
+                if (window.ForecastMap && window.ForecastMap.setTilesReady) {
+                    window.ForecastMap.setTilesReady(false);
+                }
                 valueOut = nextValue;
             }
             return [valueOut, nextPlaying, !nextPlaying];
