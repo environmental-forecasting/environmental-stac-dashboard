@@ -25,6 +25,20 @@ _FORECAST_INIT_FIELDS = {
     "exclude": ["geometry", "bbox", "assets", "links"],
 }
 
+# Variable names sit on each forecast COG as ``forecast:bands``. Ask the
+# API for assets only (no geometry, links, or file URLs) so filling the
+# variables dropdown stays fast.
+_FORECAST_BANDS_FIELDS = {
+    "include": ["id", "assets"],
+    "exclude": [
+        "geometry",
+        "bbox",
+        "links",
+        "assets.*.href",
+        "assets.*.alternate",
+    ],
+}
+
 
 def band_rescale_from_asset(
     asset: Asset, band_index: int
@@ -64,6 +78,8 @@ class STAC:
         self._catalog = Client.open(STAC_FASTAPI_URL, stac_io=stac_api_io)
         # Cache full Items by (collection_id, forecast:reference_time).
         self._item_cache: dict[tuple[str, str], Item] = {}
+        # Remember which variable names each forecast init offers.
+        self._bands_cache: dict[tuple[str, str], dict[str, int]] = {}
         # Cache forecast init rows by collection_id (summaries or slim search).
         self._forecast_inits_cache: dict[str, list[dict[str, Any]]] = {}
         # Cache Collection objects already fetched (e.g. dropdown listing).
@@ -346,6 +362,11 @@ class STAC:
 
         item = items[0]
         self._item_cache[cache_key] = item
+        # Filling the variables dropdown can reuse this Item's band list.
+        if cache_key not in self._bands_cache:
+            bands = self._bands_from_item(item)
+            if bands:
+                self._bands_cache[cache_key] = bands
         return item
 
     def get_item(self, collection_id: str, forecast_reference_time: str) -> Item:
@@ -353,8 +374,9 @@ class STAC:
         return self.get_forecast_item(collection_id, forecast_reference_time)
 
     def clear_item_cache(self) -> None:
-        """Drop cached Items, Collections, and forecast inits."""
+        """Clear cached catalogue data used by the map and variable dropdown."""
         self._item_cache.clear()
+        self._bands_cache.clear()
         self._forecast_inits_cache.clear()
         self._collection_cache.clear()
 
@@ -404,6 +426,102 @@ class STAC:
             collection_id, forecast_reference_time, asset_id
         )
         bands = {band["name"]: band["index"] for band in asset_band_props}
+        return bands
+
+    @staticmethod
+    def _bands_from_item(item: Item) -> dict[str, int]:
+        """Read variable names and band numbers from a loaded forecast Item."""
+        cogs = item.get_assets(media_type=MediaType.COG, role="data")
+        if not cogs:
+            return {}
+        asset = next(iter(cogs.values()))
+        band_props = asset.extra_fields.get("forecast:bands") or []
+        return {
+            str(band["name"]): int(band["index"])
+            for band in band_props
+            if band.get("name") is not None and band.get("index") is not None
+        }
+
+    @staticmethod
+    def _bands_from_asset_dicts(assets: dict[str, Any]) -> dict[str, int]:
+        """Read variable names and band numbers from a slim search response."""
+        for asset in assets.values():
+            if not isinstance(asset, dict):
+                continue
+            roles = asset.get("roles") or []
+            media = asset.get("type") or asset.get("media_type") or ""
+            is_data = "data" in roles
+            is_cog = "cog" in media.lower() or media == str(MediaType.COG)
+            if not (is_data or is_cog):
+                continue
+            band_props = asset.get("forecast:bands")
+            if not band_props:
+                continue
+            bands: dict[str, int] = {}
+            for band in band_props:
+                name = band.get("name")
+                index = band.get("index")
+                if name is None or index is None:
+                    continue
+                bands[str(name)] = int(index)
+            if bands:
+                return bands
+        return {}
+
+    def list_forecast_bands(
+        self, collection_id: str, forecast_reference_time: str
+    ) -> dict[str, int]:
+        """
+        List the variables available for one forecast run.
+
+        Returns a dict of variable name to band number. Prefers a light
+        catalogue search that skips file URLs and geometry, so the variables
+        dropdown can fill without waiting on a full Item download. Reuses a
+        full Item already held in memory when present.
+        """
+        cache_key = (collection_id, forecast_reference_time)
+        cached = self._bands_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        item = self._item_cache.get(cache_key)
+        if item is not None:
+            bands = self._bands_from_item(item)
+            self._bands_cache[cache_key] = bands
+            return bands
+
+        search = self._catalog.search(
+            collections=[collection_id],
+            query={"forecast:reference_time": {"eq": forecast_reference_time}},
+            fields=_FORECAST_BANDS_FIELDS,
+            max_items=1,
+        )
+        for raw in search.items_as_dicts():
+            bands = self._bands_from_asset_dicts(raw.get("assets") or {})
+            if bands:
+                self._bands_cache[cache_key] = bands
+                logger.debug(
+                    "Loaded %s bands for %s @ %s via slim Item Search",
+                    len(bands),
+                    collection_id,
+                    forecast_reference_time,
+                )
+                return bands
+
+        # Search returned nothing useful: load the full Item instead.
+        try:
+            cogs = self.get_item_cogs(collection_id, forecast_reference_time)
+        except ValueError:
+            self._bands_cache[cache_key] = {}
+            return {}
+        if not cogs:
+            self._bands_cache[cache_key] = {}
+            return {}
+        first_id = next(iter(cogs))
+        bands = self.get_asset_bands(
+            collection_id, forecast_reference_time, first_id
+        )
+        self._bands_cache[cache_key] = bands
         return bands
 
     def get_band_rescale(

@@ -676,11 +676,11 @@ def register_callbacks(app: dash.Dash):
     )
     def update_available_variables(selected_date, collection_ids: list, current_value):
         """
-        Update the variable dropdown from the selected forecast Item.
+        Fill the variable dropdown for the selected forecast date.
 
-        Band names are read from the first COG asset on the cached Item. On the
-        first load (or when the current choice is no longer available), select
-        the first variable automatically.
+        Loads variable names through a light catalogue query so the list can
+        appear without waiting for a full forecast download. On first load,
+        or when the current choice is gone, pick the first variable.
         """
         if not selected_date or not collection_ids:
             return [], None
@@ -691,21 +691,11 @@ def register_callbacks(app: dash.Dash):
 
         for collection_id in collection_ids:
             try:
-                cogs = stac.get_item_cogs(
+                available_vars = stac.list_forecast_bands(
                     collection_id, forecast_reference_time_str
                 )
-                if not cogs:
-                    continue
-                first_asset_id = next(iter(cogs))
-                available_vars = stac.get_asset_bands(
-                    collection_id,
-                    forecast_reference_time_str,
-                    first_asset_id,
-                )
-                if not available_vars:
-                    continue
                 for var_name, band_index in available_vars.items():
-                    # Avoid collisions: only keep first occurrence
+                    # Prefer the first collection that offers this name.
                     if var_name not in combined_vars:
                         combined_vars[var_name] = band_index
             except Exception as e:
