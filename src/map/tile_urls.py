@@ -19,13 +19,14 @@ def build_cog_tile_url(
     Build a TiTiler XYZ template URL for a COG asset.
 
     The browser calls ``tiler_url``; the ``url`` query parameter points at an
-    href TiTiler can fetch (rewritten onto the internal file-server when needed).
+    href TiTiler can open (``file:///data/...`` when under the data mount).
 
     Args:
         public_href: Public STAC asset href for the COG.
         tiler_url: Browser-facing TiTiler base URL.
         file_server_url: Public file-server prefix used in STAC hrefs.
-        file_server_internal_url: File-server URL reachable from TiTiler.
+        file_server_internal_url: File-server URL reachable from TiTiler
+            (fallback for non-``/data/`` paths).
         tile_matrix_set: TiTiler tile matrix set id (for example
             ``WebMercatorQuad`` or ``EPSG6931``).
         colormap: Optional rio-tiler colormap name.

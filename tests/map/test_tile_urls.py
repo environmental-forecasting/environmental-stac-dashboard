@@ -26,6 +26,7 @@ from map.projections import (  # noqa: E402
     view_hint_for_mode,
     view_mode_and_hint,
 )
+from map.asset_urls import to_tiler_asset_url  # noqa: E402
 from map.tile_urls import build_cog_tile_url  # noqa: E402
 from map.tms_client import (  # noqa: E402
     clear_tile_grid_cache,
@@ -247,6 +248,41 @@ def test_unknown_mode_raises():
         tile_matrix_set_for_mode("not_a_mode")
 
 
+def test_to_tiler_asset_url_uses_file_scheme_for_data_mount():
+    assert (
+        to_tiler_asset_url(
+            "http://localhost:8001/data/cogs/demo.tif",
+            "http://localhost:8001",
+            "http://file-server",
+        )
+        == "file:///data/cogs/demo.tif"
+    )
+    assert (
+        to_tiler_asset_url(
+            "http://file-server/data/cogs/demo.tif",
+            "http://localhost:8001",
+            "http://file-server",
+        )
+        == "file:///data/cogs/demo.tif"
+    )
+    assert (
+        to_tiler_asset_url(
+            "file:///data/cogs/demo.tif",
+            "http://localhost:8001",
+            "http://file-server",
+        )
+        == "file:///data/cogs/demo.tif"
+    )
+    assert (
+        to_tiler_asset_url(
+            "https://example.com/other.tif",
+            "http://localhost:8001",
+            "http://file-server",
+        )
+        == "https://example.com/other.tif"
+    )
+
+
 def test_build_cog_tile_url_rewrites_file_server_and_keeps_xyz_placeholders():
     url = build_cog_tile_url(
         "http://localhost:8001/data/cogs/demo.tif",
@@ -259,8 +295,9 @@ def test_build_cog_tile_url_rewrites_file_server_and_keeps_xyz_placeholders():
     assert url.startswith(
         "http://localhost:8002/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?url="
     )
-    assert "http://file-server/data/cogs/demo.tif" in url
+    assert "file:///data/cogs/demo.tif" in url
     assert "localhost:8001" not in url.split("url=")[1]
+    assert "file-server" not in url.split("url=")[1]
 
 
 def test_build_cog_tile_url_appends_style_query_params():
