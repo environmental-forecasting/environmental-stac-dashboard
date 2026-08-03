@@ -1,6 +1,7 @@
 import logging
 import math
 import os
+import time
 from datetime import datetime, timedelta
 from functools import lru_cache
 from urllib.parse import urlparse, urlunparse
@@ -8,6 +9,7 @@ from urllib.parse import urlparse, urlunparse
 import dash
 import dash_leaflet as dl
 import pandas as pd
+from components.controls import DEFAULT_COLORMAP
 from config import (
     FILE_SERVER_INTERNAL_URL,
     FILE_SERVER_URL,
@@ -16,6 +18,7 @@ from config import (
     TILER_URL,
 )
 from dash import Input, Output, State, callback_context, no_update
+from dash.exceptions import PreventUpdate
 from pystac import Asset
 from stac.process import STAC
 from stac.timefmt import (
@@ -39,17 +42,16 @@ from map import (
     list_view_mode_presets,
     resolve_mode_and_engine,
     resolve_engine_for_mode,
+    rewrite_layer_entries_style,
     rewrite_layer_entries_tms,
+    rewrite_leadtime_cog_urls_style,
     tile_matrix_set_for_mode,
     to_tiler_asset_url,
     view_mode_and_hint,
 )
 
-from .utils import (
-    convert_colormap_to_colorscale,
-    get_cog_band_statistics,
-    round_2dp,
-)
+from .display_style import cbar_ramp_style, cbar_slider_step, normalise_display_style
+from .utils import get_cog_band_statistics, round_2dp
 
 
 @lru_cache(maxsize=1)
@@ -451,26 +453,6 @@ def register_callbacks(app: dash.Dash):
 
     app.clientside_callback(
         """
-        function(pace, custom) {
-            var ms = pace;
-            if (custom != null && custom !== "" && !Number.isNaN(Number(custom))) {
-                ms = Math.max(100, Math.min(5000, Number(custom)));
-            }
-            if (ms == null) {
-                ms = 750;
-            }
-            return [ms, ms];
-        }
-        """,
-        Output("leadtime-pace-ms", "data"),
-        Output("leadtime-play-interval", "interval"),
-        Input("leadtime-pace", "value"),
-        Input("leadtime-pace-custom", "value"),
-        prevent_initial_call=False,
-    )
-
-    app.clientside_callback(
-        """
         function(value, playing) {
             var nu = window.dash_clientside.no_update;
             if (window.__forecastTimelineProgrammatic) {
@@ -855,18 +837,16 @@ def register_callbacks(app: dash.Dash):
     @app.callback(
         Output("map-state", "data"),
         Output("cog-results-layer", "children"),
-        Output("rescale-store", "data"),
+        Output("display-style", "data"),
         Output("map-view-mode", "value"),
         Input("colormap-dropdown", "value"),
         Input("forecast-init-date-picker", "value"),
         Input("variable-dropdown", "value"),
-        Input("fix-colorbar-range", "data"),
-        Input("fixed-min", "value"),
-        Input("fixed-max", "value"),
         Input("collections-dropdown", "value"),
         Input("leadtime-slider", "value"),
         Input("map-view-mode", "value"),
-        State("rescale-store", "data"),
+        Input("map-style-refresh", "data"),
+        State("display-style", "data"),
         State("map-state", "data"),
         State("leadtime-playing", "data"),
         prevent_initial_call=True,
@@ -875,13 +855,11 @@ def register_callbacks(app: dash.Dash):
         colormap: str,
         forecast_start_date: str,
         band_index: int,
-        fix_range,
-        fixed_min,
-        fixed_max,
         collection_ids: list,
         leadtime: int,
         map_view_mode: str,
-        rescale_store,
+        style_refresh,
+        display_style,
         map_state,
         leadtime_playing,
     ):
@@ -889,21 +867,47 @@ def register_callbacks(app: dash.Dash):
         Update map COG layers from the cached forecast Item.
 
         Writes shared ``map-state`` for OpenLayers (default). When the engine is
-        ``leaflet_legacy``, also builds Leaflet Overlay children. Auto mode
-        prefers band STATISTICS_* on the Item; TiTiler statistics are only a
-        fallback. Colour map changes reuse rescale-store. Leadtime changes
-        while playing (and scrubbing with a known scale) reuse that store so
-        stats are not re-queried mid-animation. fixed-min/max are Inputs so
-        fixed mode updates tiles, but they are not Outputs here (avoids a
-        feedback loop). A separate callback copies rescale-store into the
-        min/max inputs for display in auto mode.
+        ``leaflet_legacy``, also builds Leaflet Overlay children.
 
-        View-mode changes rebuild tiles for the matching projection and host
-        (engine is derived from the selected mode). Collections whose extent
-        does not fit the hemisphere are skipped. Polar modes that lack a
-        TiTiler TMS fall back to global Web Mercator.
+        The display range and lock flag live in ``display-style`` (the single
+        source of truth for the colourbar). When locked, that pinned range is
+        used to build tiles here; when unlocked, this callback computes fresh
+        statistics (Item STATISTICS_* first, TiTiler statistics as a
+        fallback). Locked colormap edits are applied by
+        ``apply_locked_display_style`` instead of here, so this callback does
+        not take the colourbar min/max inputs as Inputs (that would create a
+        feedback loop with the clientside pin callbacks).
+
+        Picking a new variable clears any pinned range from the previous
+        band. ``map-style-refresh`` (fired by the colourbar Auto button)
+        forces a fresh unlocked statistics rebuild even if a pinned range was
+        active moments before.
+
+        Leadtime changes while playing (and scrubbing with a known or pinned
+        range) reuse the current range so stats are not re-queried
+        mid-animation. View-mode changes rebuild tiles for the matching
+        projection and host (engine is derived from the selected mode);
+        collections whose extent does not fit the hemisphere are skipped, and
+        polar modes that lack a TiTiler TMS fall back to global Web Mercator.
         """
         triggered = callback_context.triggered_id
+        style = normalise_display_style(display_style)
+        locked = bool(style.get("locked"))
+        force_stats = triggered == "map-style-refresh"
+
+        # A new variable must not keep a pinned range from the previous band.
+        if triggered == "variable-dropdown" and locked:
+            locked = False
+            style["locked"] = False
+            style["source"] = "stats"
+
+        # Locked colormap edits are applied clientside by
+        # apply_locked_display_style; nothing to do here.
+        if triggered == "colormap-dropdown" and locked:
+            return no_update, no_update, no_update, no_update
+
+        active_colormap = colormap or style.get("colormap") or DEFAULT_COLORMAP
+
         ui_mode = map_view_mode or MapViewMode.GLOBAL_3857.value
         requested_mode, _ = resolve_mode_and_engine(ui_mode)
 
@@ -921,7 +925,7 @@ def register_callbacks(app: dash.Dash):
             engine = resolve_engine_for_mode(mode)
             mode_control = mode if mode != ui_mode else no_update
 
-        def _publish(layer_entries, next_rescale):
+        def _publish(layer_entries, next_style):
             next_state = build_map_state(
                 previous=map_state,
                 engine=engine,
@@ -937,7 +941,7 @@ def register_callbacks(app: dash.Dash):
             return (
                 next_state,
                 leaflet_children,
-                next_rescale,
+                next_style,
                 mode_control,
             )
 
@@ -946,12 +950,6 @@ def register_callbacks(app: dash.Dash):
             if triggered != "map-view-mode":
                 return no_update, no_update, no_update, no_update
             return _publish([], no_update)
-
-        is_fixed = "fixed" in (fix_range or [])
-
-        # Ignore write-back from syncing auto rescale into the min/max inputs.
-        if triggered in ("fixed-min", "fixed-max") and not is_fixed:
-            return no_update, no_update, no_update, no_update
 
         stac = _get_stac_client()
         forecast_reference_time_str = date_picker_to_reference_time(forecast_start_date)
@@ -964,12 +962,30 @@ def register_callbacks(app: dash.Dash):
                 forecast_reference_time_str,
                 leadtime,
                 band_index,
-                colormap,
+                active_colormap,
                 min_val,
                 max_val,
                 tile_matrix_set=tile_matrix_set,
                 view_mode=mode,
             )
+
+        def _style_for(min_val, max_val, *, source: str):
+            next_style = dict(style)
+            next_style["colormap"] = active_colormap
+            next_style["vmin"] = float(min_val)
+            next_style["vmax"] = float(max_val)
+            next_style["source"] = source
+            next_style["locked"] = False
+            if source == "stats":
+                next_style["domain_min"] = float(min_val)
+                next_style["domain_max"] = float(max_val)
+            else:
+                # Keep the prior domain; expand it if the window moves outside.
+                dmin = float(next_style.get("domain_min", min_val))
+                dmax = float(next_style.get("domain_max", max_val))
+                next_style["domain_min"] = min(dmin, float(min_val))
+                next_style["domain_max"] = max(dmax, float(max_val))
+            return next_style
 
         # TMS / view-mode switch: rewrite TileMatrixSet on existing URLs.
         # Skip STAC walks, extent filtering, and TiTiler statistics so the
@@ -981,58 +997,39 @@ def register_callbacks(app: dash.Dash):
             )
             if rewritten is not None:
                 return _publish(rewritten, no_update)
-            if (
-                isinstance(rescale_store, dict)
-                and "min" in rescale_store
-                and "max" in rescale_store
-            ):
-                layer_entries = _layers_for_scale(
-                    rescale_store["min"], rescale_store["max"]
-                )
+            if "vmin" in style and "vmax" in style:
+                layer_entries = _layers_for_scale(style["vmin"], style["vmax"])
                 if layer_entries:
                     return _publish(layer_entries, no_update)
                 return _publish([], no_update)
 
-        # Colour map only: rebuild tile URLs from the stored range.
-        if (
-            triggered == "colormap-dropdown"
-            and not is_fixed
-            and isinstance(rescale_store, dict)
-            and "min" in rescale_store
-            and "max" in rescale_store
-        ):
-            layer_entries = _layers_for_scale(
-                rescale_store["min"], rescale_store["max"]
-            )
+        # Colour map only, unlocked: reuse the current range from display-style.
+        if triggered == "colormap-dropdown" and not locked:
+            layer_entries = _layers_for_scale(style["vmin"], style["vmax"])
             if not layer_entries:
                 return no_update, no_update, no_update, no_update
-            return _publish(layer_entries, no_update)
+            return _publish(
+                layer_entries,
+                _style_for(
+                    style["vmin"], style["vmax"], source=style.get("source") or "stats"
+                ),
+            )
 
         # Leadtime scrub/play: keep the current colour scale. Never re-query
-        # band stats mid-animation (or while scrubbing with a known scale).
-        reuse_leadtime_scale = triggered == "leadtime-slider" and (
-            bool(leadtime_playing)
-            or (
-                isinstance(rescale_store, dict)
-                and "min" in rescale_store
-                and "max" in rescale_store
+        # band stats mid-animation (or while scrubbing with a known or pinned
+        # scale).
+        reuse_leadtime_scale = (
+            not force_stats
+            and triggered == "leadtime-slider"
+            and (
+                bool(leadtime_playing)
+                or ("vmin" in style and "vmax" in style)
+                or locked
             )
-            or is_fixed
         )
         if reuse_leadtime_scale:
-            if is_fixed:
-                min_val = fixed_min if fixed_min is not None else 0
-                max_val = fixed_max if fixed_max is not None else 1
-            elif (
-                isinstance(rescale_store, dict)
-                and "min" in rescale_store
-                and "max" in rescale_store
-            ):
-                min_val = rescale_store["min"]
-                max_val = rescale_store["max"]
-            else:
-                min_val = None
-                max_val = None
+            min_val = style.get("vmin")
+            max_val = style.get("vmax")
             if min_val is not None and max_val is not None:
                 layer_entries = _layers_for_scale(min_val, max_val)
                 if not layer_entries:
@@ -1067,10 +1064,11 @@ def register_callbacks(app: dash.Dash):
                 cog_asset = cog_assets[leadtime]
                 layer_specs.append((collection_id, cog_asset, cog_asset.href))
 
-                # Determine rescale range
-                if is_fixed:
-                    min_val = fixed_min if fixed_min is not None else 0
-                    max_val = fixed_max if fixed_max is not None else 1
+                # Determine rescale range: a user pin wins unless this is a
+                # forced Auto reset, otherwise resolve fresh statistics.
+                if locked and not force_stats:
+                    min_val = style["vmin"]
+                    max_val = style["vmax"]
                 else:
                     # Prefer Item STATISTICS_*; fall back to TiTiler /cog/statistics
                     min_val, max_val = _resolve_band_minmax(
@@ -1100,7 +1098,7 @@ def register_callbacks(app: dash.Dash):
             forecast_reference_time_str,
             leadtime,
             band_index,
-            colormap,
+            active_colormap,
             min_val,
             max_val,
             tile_matrix_set=tile_matrix_set,
@@ -1111,53 +1109,64 @@ def register_callbacks(app: dash.Dash):
                 return _publish([], no_update)
             return no_update, no_update, no_update, no_update
 
-        new_store = {"min": min_val, "max": max_val}
-        return _publish(layer_entries, new_store)
-
-    @app.callback(
-        Output("fixed-min", "value"),
-        Output("fixed-max", "value"),
-        Input("rescale-store", "data"),
-        State("fix-colorbar-range", "data"),
-        prevent_initial_call=True,
-    )
-    def sync_minmax_inputs_from_rescale(rescale_store, fix_range):
-        """Show auto-computed min/max in the inputs without feeding update_cog_layer."""
-        if "fixed" in (fix_range or []):
-            return no_update, no_update
-        if not isinstance(rescale_store, dict):
-            return no_update, no_update
-        if "min" not in rescale_store or "max" not in rescale_store:
-            return no_update, no_update
-        return rescale_store["min"], rescale_store["max"]
-
-    @app.callback(
-        Output("forecast-cbar-ramp", "style"),
-        Output("forecast-cbar-min", "children"),
-        Output("forecast-cbar-max", "children"),
-        Input("colormap-dropdown", "value"),
-        Input("fixed-min", "value"),
-        Input("fixed-max", "value"),
-        prevent_initial_call=True,
-    )
-    def show_cbar(colormap, min_val, max_val):
-        """Update the shared timeline colourbar from colormap and min/max."""
-        colorscale = (
-            convert_colormap_to_colorscale(colormap) if colormap else []
+        next_style = _style_for(
+            min_val, max_val, source="user" if (locked and not force_stats) else "stats"
         )
-        if not (
-            isinstance(min_val, (int, float)) and isinstance(max_val, (int, float))
-        ):
-            min_val, max_val = 0, 1
-        ramp_colors = colorscale if isinstance(colorscale, list) and colorscale else []
-        ramp_style = {
-            "background": (
-                f"linear-gradient(to right, {', '.join(ramp_colors)})"
-                if ramp_colors
-                else None
-            ),
-        }
-        return ramp_style, str(min_val), str(max_val)
+        return _publish(layer_entries, next_style)
+
+    @app.callback(
+        Output("map-state", "data", allow_duplicate=True),
+        Output("cog-results-layer", "children", allow_duplicate=True),
+        Input("display-style", "data"),
+        State("map-state", "data"),
+        prevent_initial_call=True,
+    )
+    def apply_locked_display_style(display_style, map_state):
+        """
+        Rewrite tile URLs on the current layers when a pinned range changes.
+
+        Runs after the clientside pin callbacks write a locked colormap or
+        min/max onto ``display-style``. Only rewrites query parameters on
+        existing tile URLs; it never re-queries STAC or TiTiler statistics.
+        """
+        style = normalise_display_style(display_style)
+        if not style.get("locked"):
+            raise PreventUpdate
+
+        layers = (map_state or {}).get("layers") or []
+        if not layers:
+            raise PreventUpdate
+
+        rescale = (style["vmin"], style["vmax"])
+        rewritten = rewrite_layer_entries_style(
+            layers, colormap=style.get("colormap"), rescale=rescale
+        )
+        if rewritten is None:
+            raise PreventUpdate
+
+        build_kwargs = {}
+        leadtime_cog_urls = (map_state or {}).get("leadtimeCogUrls")
+        rewritten_cog_urls = rewrite_leadtime_cog_urls_style(
+            leadtime_cog_urls, colormap=style.get("colormap"), rescale=rescale
+        )
+        if rewritten_cog_urls is not None:
+            build_kwargs["leadtime_cog_urls"] = rewritten_cog_urls
+
+        engine = (map_state or {}).get("engine")
+        next_state = build_map_state(
+            previous=map_state,
+            engine=engine,
+            mode=(map_state or {}).get("mode"),
+            layers=rewritten,
+            view=(map_state or {}).get("view"),
+            **build_kwargs,
+        )
+        leaflet_children = (
+            _build_leaflet_overlays(rewritten)
+            if engine == MapEngine.LEAFLET_LEGACY.value
+            else []
+        )
+        return next_state, leaflet_children
 
     @app.callback(
         Output("controls-column", "className"),
@@ -1176,49 +1185,177 @@ def register_callbacks(app: dash.Dash):
         return class_name, opened, icon
 
     @app.callback(
-        Output("fix-colorbar-button", "style"),
-        Output("fix-colorbar-range", "data"),
-        Output("fixed-min", "disabled"),
-        Output("fixed-max", "disabled"),
-        Input("fix-colorbar-button", "n_clicks"),
+        Output("fixed-min", "value"),
+        Output("fixed-max", "value"),
+        Output("colorbar-range-reset", "disabled"),
+        Output("forecast-cbar-ramp", "style"),
+        Output("colorbar-range-slider", "value"),
+        Output("colorbar-range-slider", "min"),
+        Output("colorbar-range-slider", "max"),
+        Output("colorbar-range-slider", "step"),
+        Output("colorbar-range-slider-wrap", "style"),
+        Input("display-style", "data"),
         prevent_initial_call=False,
     )
-    def toggle_fix_colorbar_button(n_clicks: int):
+    def project_display_style(display_style):
         """
-        Toggles 'fix colorbar' button state.
+        Drive the timeline colourbar and range controls from display-style.
 
-        When button is clicked, this function alternates between two states:
-        - Fixed mode: Updates button style to active, sets colourbar range to manual min/max range.
-        - Unfixed mode: Reverts button styling, clears colorbar range data, and enables automatic min/max from dataset.
-
-        Args:
-            n_clicks: No. of times 'fix-colorbar-button' has been clicked.
-                Used to determine whether the state is fixed or unfixed.
-
-        Returns:
-            dict: CSS style for the 'fix-colorbar-button', with themed background/foreground colors based on state.
-            list: Colorbar range data, set to ['fixed'] when in fixed mode, and empty list otherwise.
-            bool: Disabled state for the 'fixed-min' input (True if not fixed, False if fixed).
-            bool: Disabled state for the 'fixed-max' input (same as 'fixed-min').
-
-        Notes:
-            - The callback is triggered on every click due to `prevent_initial_call=False`.
-            - When not fixed, users can manually adjust min/max values; when fixed, adjustments are disabled.
-            - Button styling alternates between a primary theme color and gray for visual feedback.
-            - In auto mode, min/max are filled from rescale-store (Item STATISTICS_* or TiTiler fallback).
+        display-style is the single source of truth for colour range. This
+        callback only reads it and updates the visible min/max text, the
+        ramp gradient, and the range slider; it never writes back to
+        display-style.
         """
-        is_fixed = n_clicks % 2 == 1
-        style = {
-            "backgroundColor": "#3d7ab5" if is_fixed else "rgba(255, 255, 255, 0.08)",
-            "border": "1px solid rgba(255, 255, 255, 0.14)",
-            "padding": "8px 10px",
-            "borderRadius": "6px",
-            "cursor": "pointer",
-            "width": "100%",
-            "marginBottom": "10px",
-            "fontWeight": "500",
-            "color": "#e8ecf4",
+        style = normalise_display_style(display_style)
+        locked = bool(style["locked"])
+        vmin = round_2dp(style["vmin"])
+        vmax = round_2dp(style["vmax"])
+        dmin = round_2dp(style["domain_min"])
+        dmax = round_2dp(style["domain_max"])
+        ramp = cbar_ramp_style(style.get("colormap"))
+        gradient = ramp.get("background")
+        return (
+            str(vmin),
+            str(vmax),
+            # Auto reset is only useful once the user has pinned a range.
+            not locked,
+            ramp,
+            [vmin, vmax],
+            dmin,
+            dmax,
+            cbar_slider_step(dmin, dmax),
+            {"--cbar-gradient": gradient} if gradient else {},
+        )
+
+    @app.callback(
+        Output("colorbar-range-popover", "opened"),
+        Input("colorbar-range-reset", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def close_colorbar_range_popover(_reset_clicks):
+        """Close the colour-range popover after the Auto button is pressed."""
+        return False
+
+    @app.callback(
+        Output("display-style", "data", allow_duplicate=True),
+        Output("map-style-refresh", "data"),
+        Input("colorbar-range-reset", "n_clicks"),
+        State("display-style", "data"),
+        prevent_initial_call=True,
+    )
+    def reset_colorbar_range(_reset_clicks, display_style):
+        """Unlock the colour range and force a fresh statistics rebuild."""
+        style = normalise_display_style(display_style)
+        if not style.get("locked"):
+            raise PreventUpdate
+        style["locked"] = False
+        style["source"] = "stats"
+        return style, {"ts": time.time()}
+
+    # Typing a fixed min/max, or picking a colormap while locked, pins the
+    # colour range. update_cog_layer skips locked colormap edits; the
+    # apply_locked_display_style Python callback rewrites tile URLs.
+    app.clientside_callback(
+        """
+        function(colormap, vmin, vmax, style) {
+            var nu = window.dash_clientside.no_update;
+            if (!style) {
+                return nu;
+            }
+            var nextVmin = (vmin == null || vmin === "") ? style.vmin : Number(vmin);
+            var nextVmax = (vmax == null || vmax === "") ? style.vmax : Number(vmax);
+            if (!isFinite(nextVmin) || !isFinite(nextVmax)) {
+                return nu;
+            }
+            if (nextVmax < nextVmin) {
+                var swap = nextVmin;
+                nextVmin = nextVmax;
+                nextVmax = swap;
+            }
+            var nextCmap = colormap || style.colormap || "blues_r";
+            var nearly = function (a, b) {
+                return Math.abs(Number(a) - Number(b)) < 1e-9;
+            };
+            var rangeChanged =
+                !nearly(nextVmin, style.vmin) || !nearly(nextVmax, style.vmax);
+            var cmapChanged = nextCmap !== style.colormap;
+            // Typing min/max pins the range. Colormap alone only rewrites tiles
+            // when the range is already pinned.
+            if (!rangeChanged && !cmapChanged) {
+                return nu;
+            }
+            if (!rangeChanged && !style.locked) {
+                return nu;
+            }
+            var domainMin = Number(style.domain_min);
+            var domainMax = Number(style.domain_max);
+            if (!isFinite(domainMin)) domainMin = nextVmin;
+            if (!isFinite(domainMax)) domainMax = nextVmax;
+            var nextStyle = Object.assign({}, style, {
+                colormap: nextCmap,
+                vmin: nextVmin,
+                vmax: nextVmax,
+                domain_min: Math.min(domainMin, nextVmin),
+                domain_max: Math.max(domainMax, nextVmax),
+                locked: true,
+                source: "user",
+            });
+            return nextStyle;
         }
-        disabled_inputs = False if is_fixed else True
+        """,
+        Output("display-style", "data", allow_duplicate=True),
+        Input("colormap-dropdown", "value"),
+        Input("fixed-min", "value"),
+        Input("fixed-max", "value"),
+        State("display-style", "data"),
+        prevent_initial_call=True,
+    )
 
-        return style, (["fixed"] if is_fixed else []), disabled_inputs, disabled_inputs
+    # Dragging the range slider also pins the colour range.
+    app.clientside_callback(
+        """
+        function(range, style) {
+            var nu = window.dash_clientside.no_update;
+            if (!style || !range || range.length < 2) {
+                return nu;
+            }
+            var nextVmin = Number(range[0]);
+            var nextVmax = Number(range[1]);
+            if (!isFinite(nextVmin) || !isFinite(nextVmax)) {
+                return nu;
+            }
+            if (nextVmax < nextVmin) {
+                var swap = nextVmin;
+                nextVmin = nextVmax;
+                nextVmax = swap;
+            }
+            var nearly = function (a, b) {
+                return Math.abs(Number(a) - Number(b)) < 1e-9;
+            };
+            if (nearly(nextVmin, style.vmin) && nearly(nextVmax, style.vmax) && style.locked) {
+                return nu;
+            }
+            if (nearly(nextVmin, style.vmin) && nearly(nextVmax, style.vmax) && !style.locked) {
+                // Opening/projecting the slider should not pin until the user moves it.
+                return nu;
+            }
+            var domainMin = Number(style.domain_min);
+            var domainMax = Number(style.domain_max);
+            if (!isFinite(domainMin)) domainMin = nextVmin;
+            if (!isFinite(domainMax)) domainMax = nextVmax;
+            var nextStyle = Object.assign({}, style, {
+                vmin: nextVmin,
+                vmax: nextVmax,
+                domain_min: Math.min(domainMin, nextVmin),
+                domain_max: Math.max(domainMax, nextVmax),
+                locked: true,
+                source: "user",
+            });
+            return nextStyle;
+        }
+        """,
+        Output("display-style", "data", allow_duplicate=True),
+        Input("colorbar-range-slider", "value"),
+        State("display-style", "data"),
+        prevent_initial_call=True,
+    )

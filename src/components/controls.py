@@ -50,37 +50,6 @@ controls_panel = html.Div(
             clearable=False,
             className="forecast-controls__dropdown",
         ),
-        html.Label("Colourbar range"),
-        html.Div(
-            [
-                html.Div(
-                    [
-                        dcc.Input(
-                            id="fixed-min",
-                            type="number",
-                            placeholder="min",
-                            debounce=True,
-                            className="forecast-controls__number",
-                        ),
-                        dcc.Input(
-                            id="fixed-max",
-                            type="number",
-                            placeholder="max",
-                            debounce=True,
-                            className="forecast-controls__number",
-                        ),
-                    ],
-                    className="forecast-controls__minmax",
-                ),
-                html.Button(
-                    "Fix colourbar range",
-                    id="fix-colorbar-button",
-                    n_clicks=0,
-                    type="button",
-                    className="forecast-controls__action",
-                ),
-            ],
-        ),
     ],
     id="controls",
     className="forecast-controls-panel forecast-chrome",

@@ -416,28 +416,22 @@
 
 .forecast-timeline--idle .forecast-timeline__scrubber,
 .forecast-timeline--idle .forecast-timeline__transport,
-.forecast-timeline--idle .forecast-timeline__right {
+.forecast-timeline--idle .forecast-cbar-block {
   opacity: 0.45;
   pointer-events: none;
 }
 
 .forecast-timeline__row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   min-height: 40px;
 }
 
-.forecast-timeline__left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  flex: 1 1 220px;
-}
-
 .forecast-timeline__labels {
   min-width: 0;
+  justify-self: start;
 }
 
 .forecast-timeline__valid {
@@ -461,7 +455,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 0 0 auto;
+  justify-self: center;
 }
 
 .forecast-timeline__btn {
@@ -493,59 +487,209 @@
   background: rgba(61, 122, 181, 0.55);
 }
 
-.forecast-timeline__right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1 1 220px;
-  justify-content: flex-end;
-}
-
-.forecast-timeline__speed-label {
-  font-size: 13px;
-  color: #c5cede;
-}
-
-/* Capsule around Speed pills (same chrome as header TMS selector). */
-.forecast-timeline__right .forecast-map-view-mode {
-  border-radius: 999px;
-  padding: 3px;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.forecast-timeline__speed-custom {
-  width: 72px;
-  border-radius: 999px;
-  padding: 5px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: transparent;
-  color: #e8ecf4;
-  font-size: 13px;
-}
-
 .forecast-timeline__scrubber {
   flex: 1 1 auto;
   margin: 0 4px;
+}
+
+.forecast-cbar-block {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  justify-self: end;
+  justify-content: center;
 }
 
 .forecast-cbar--inline {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 6px;
-  min-width: 120px;
-  max-width: 160px;
-  padding: 4px 6px;
-  border-radius: 6px;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  max-width: 480px;
+  padding: 5px 8px;
+  border-radius: 8px;
   background: rgba(0, 0, 0, 0.22);
 }
 
-.forecast-cbar__ramp {
-  flex: 1;
-  height: 10px;
+.forecast-cbar__auto {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 3px 8px;
   border-radius: 999px;
-  min-width: 64px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(61, 122, 181, 0.9);
+  color: #f4f7fc;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.forecast-cbar__auto:hover:not(:disabled) {
+  background: rgba(61, 122, 181, 1);
+}
+
+.forecast-cbar__auto:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: rgba(0, 0, 0, 0.28);
+  color: #c5cede;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.forecast-cbar__ramp-wrap {
+  flex: 1 1 auto;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+}
+
+.forecast-cbar__ramp-wrap > * {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.forecast-cbar__ramp-wrap .forecast-cbar__ramp {
+  width: 100%;
+  flex: 1 1 auto;
+}
+
+.forecast-cbar__ramp {
+  height: 16px;
+  border-radius: 999px;
+  min-width: 120px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.forecast-cbar__ramp:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  filter: brightness(1.08);
+}
+
+.forecast-cbar__ramp:focus-visible {
+  outline: 2px solid rgba(91, 141, 239, 0.7);
+  outline-offset: 2px;
+}
+
+.forecast-cbar__value,
+.forecast-cbar__value.dash-input,
+.forecast-cbar--inline .dash-input-container {
+  flex: 0 0 auto;
+  width: 48px;
+  min-width: 40px;
+  max-width: 56px;
+  margin: 0;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #d7deea;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.forecast-cbar--inline .dash-input-container {
+  display: inline-flex;
+  width: 48px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.forecast-cbar--inline .dash-input-element {
+  width: 100%;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #d7deea;
+  font-size: 11px;
+  text-align: center;
+}
+
+.forecast-cbar--inline .dash-input-element:hover,
+.forecast-cbar--inline .dash-input-element:focus,
+.forecast-cbar__value:hover,
+.forecast-cbar__value:focus {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.28);
+  outline: none;
+}
+
+.forecast-cbar--inline .dash-input-stepper {
+  display: none !important;
+}
+
+.forecast-cbar-slider__dropdown {
+  min-width: 280px;
+  max-width: min(420px, 92vw);
+  padding: 12px 14px 10px;
+  background: rgba(18, 24, 36, 0.96) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e8ecf4;
+}
+
+.forecast-cbar-slider__title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #d7deea;
+}
+
+.forecast-cbar-slider-wrap {
+  width: 100%;
+  padding: 6px 2px 28px;
+  --cbar-gradient: linear-gradient(to right, #08306b, #f7fbff);
+}
+
+.forecast-cbar-slider-wrap .mantine-Slider-track,
+.forecast-cbar-slider-wrap .mantine-RangeSlider-track {
+  background: var(--cbar-gradient) !important;
+  height: 12px;
+}
+
+.forecast-cbar-slider-wrap .mantine-Slider-bar,
+.forecast-cbar-slider-wrap .mantine-RangeSlider-bar {
+  background: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-sizing: border-box;
+}
+
+.forecast-cbar-slider-wrap .mantine-Slider-thumb,
+.forecast-cbar-slider-wrap .mantine-RangeSlider-thumb {
+  border: 2px solid #f4f7fc;
+  background: #3d7ab5;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+/* Keep value chips under the track so they do not sit on the title. */
+.forecast-cbar-slider-wrap .mantine-Slider-label,
+.forecast-cbar-slider-wrap .mantine-RangeSlider-label {
+  top: calc(100% + 8px) !important;
+  bottom: auto !important;
+  transform: translate(-50%, 0) !important;
+  background: rgba(18, 24, 36, 0.95);
+  color: #e8ecf4;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 11px;
 }
 
 .forecast-cbar__label {
@@ -685,7 +829,14 @@
   }
 
   .forecast-timeline__row {
-    flex-wrap: wrap;
+    grid-template-columns: 1fr;
+    row-gap: 6px;
+  }
+
+  .forecast-timeline__labels,
+  .forecast-timeline__transport,
+  .forecast-cbar-block {
+    justify-self: center;
   }
 
   .forecast-controls-column:not(.forecast-controls-column--collapsed) {
