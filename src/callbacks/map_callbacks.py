@@ -37,7 +37,10 @@ from map import (
     MapViewMode,
     bbox_fits_view_mode,
     build_cog_tile_url,
+    build_leadtime_cog_urls,
     build_map_state,
+    layers_from_leadtime_cog_urls,
+    leadtime_cog_urls_match_style,
     list_view_mode_options,
     list_view_mode_presets,
     resolve_mode_and_engine,
@@ -45,6 +48,7 @@ from map import (
     rewrite_layer_entries_style,
     rewrite_layer_entries_tms,
     rewrite_leadtime_cog_urls_style,
+    rewrite_leadtime_cog_urls_tms,
     tile_matrix_set_for_mode,
     to_tiler_asset_url,
     view_mode_and_hint,
@@ -217,6 +221,66 @@ def _build_forecast_layer_entries(
     return layers
 
 
+def _build_leadtime_cog_urls(
+    stac: STAC,
+    collection_ids: list,
+    forecast_reference_time_str: str,
+    band_index: int,
+    colormap: str,
+    min_val: float,
+    max_val: float,
+    tile_matrix_set: str,
+    view_mode: str,
+) -> dict | None:
+    """
+    Collect every leadtime COG URL for the current forecast and style.
+
+    Published on map-state as ``leadtimeCogUrls`` so the browser can swap
+    overlays while scrubbing or playing without a Python round trip.
+
+    Args:
+        stac: Cached STAC client.
+        collection_ids: Selected collection ids.
+        forecast_reference_time_str: Forecast init as a STAC datetime string.
+        band_index: One-based band index for TiTiler.
+        colormap: rio-tiler colormap name.
+        min_val: Display rescale minimum.
+        max_val: Display rescale maximum.
+        tile_matrix_set: TiTiler tile matrix set id.
+        view_mode: Active map view mode (filters unfit hemispheres).
+
+    Returns:
+        Payload for map-state, or None when no collection has COG assets.
+    """
+    hrefs_by_collection: dict[str, list[str]] = {}
+    for collection_id in collection_ids or []:
+        try:
+            if not _collection_fits_view_mode(stac, collection_id, view_mode):
+                continue
+            cogs = stac.get_item_cogs(collection_id, forecast_reference_time_str)
+            hrefs_by_collection[collection_id] = [
+                to_tiler_asset_url(
+                    asset.href, FILE_SERVER_URL, FILE_SERVER_INTERNAL_URL
+                )
+                for asset in cogs.values()
+            ]
+        except Exception as e:
+            logging.error(
+                "Error collecting leadtime COG URLs for %s: %s", collection_id, e
+            )
+            continue
+
+    return build_leadtime_cog_urls(
+        tiler_base=TILER_URL,
+        tile_matrix_set=tile_matrix_set,
+        hrefs_by_collection=hrefs_by_collection,
+        colormap=colormap,
+        rescale=(min_val, max_val),
+        band_index=band_index,
+        reference_time=forecast_reference_time_str,
+    )
+
+
 def _collection_fits_view_mode(
     stac: STAC, collection_id: str, view_mode: str
 ) -> bool:
@@ -343,6 +407,94 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_call=True,
     )
 
+    # A new forecast init makes the published COG URLs stale, so drop them
+    # before the scrubber resets and asks for a swap.
+    app.clientside_callback(
+        """
+        function(_date) {
+            if (window.ForecastMap
+                    && typeof window.ForecastMap.clearLeadtimeCogUrls === "function") {
+                window.ForecastMap.clearLeadtimeCogUrls();
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("map-bridge-tick", "data", allow_duplicate=True),
+        Input("forecast-init-date-picker", "value"),
+        prevent_initial_call=True,
+    )
+
+    # Swap overlay URLs straight from the published leadtimeCogUrls cache, then
+    # ask Python to confirm once scrubbing settles. Playback never confirms:
+    # the browser owns every frame until the user pauses.
+    app.clientside_callback(
+        """
+        function(lead, playing) {
+            var nu = window.dash_clientside.no_update;
+            if (window.ForecastMap
+                    && typeof window.ForecastMap.applyLeadtimeIndex === "function") {
+                window.ForecastMap.applyLeadtimeIndex(lead);
+            }
+            if (window.__leadtimeConfirmTimer) {
+                clearTimeout(window.__leadtimeConfirmTimer);
+                window.__leadtimeConfirmTimer = null;
+            }
+            if (playing) {
+                return nu;
+            }
+            // Without a cache the first paint still comes from Python, which
+            // the date / variable / collection inputs already trigger.
+            if (!window.ForecastMap
+                    || typeof window.ForecastMap.hasLeadtimeCogUrls !== "function"
+                    || !window.ForecastMap.hasLeadtimeCogUrls()) {
+                return nu;
+            }
+            var leadValue = lead;
+            window.__leadtimeConfirmTimer = setTimeout(function () {
+                window.__leadtimeConfirmTimer = null;
+                window.dash_clientside.set_props("leadtime-confirm", {
+                    data: {lead: leadValue, ts: Date.now()},
+                });
+            }, 350);
+            return nu;
+        }
+        """,
+        Output("map-bridge-tick", "data", allow_duplicate=True),
+        Input("leadtime-slider", "value"),
+        State("leadtime-playing", "data"),
+        prevent_initial_call=True,
+    )
+
+    # Pausing leaves the slider where playback stopped, so confirm that step
+    # right away instead of waiting for another scrub.
+    app.clientside_callback(
+        """
+        function(playing, lead) {
+            var nu = window.dash_clientside.no_update;
+            if (playing) {
+                return nu;
+            }
+            if (!window.ForecastMap
+                    || typeof window.ForecastMap.hasLeadtimeCogUrls !== "function"
+                    || !window.ForecastMap.hasLeadtimeCogUrls()) {
+                return nu;
+            }
+            if (window.__leadtimeConfirmTimer) {
+                clearTimeout(window.__leadtimeConfirmTimer);
+                window.__leadtimeConfirmTimer = null;
+            }
+            window.dash_clientside.set_props("leadtime-confirm", {
+                data: {lead: lead, ts: Date.now()},
+            });
+            return nu;
+        }
+        """,
+        Output("map-bridge-tick", "data", allow_duplicate=True),
+        Input("leadtime-playing", "data"),
+        State("leadtime-slider", "value"),
+        prevent_initial_call=True,
+    )
+
     # Leadtime transport / pace / keyboard (clientside for snappy playback).
     # Programmatic slider writes set window.__forecastTimelineProgrammatic so
     # pause-on-scrub does not immediately cancel play/interval advances.
@@ -367,6 +519,12 @@ def register_callbacks(app: dash.Dash):
             // Hold the frame until the active map reports forecast tiles loaded.
             if (window.ForecastMap && window.ForecastMap.isTilesReady
                     && !window.ForecastMap.isTilesReady()) {
+                return [nu, true, false];
+            }
+            // Do not outrun an overlay swap that is still fading in.
+            if (window.ForecastMapOpenLayers
+                    && typeof window.ForecastMapOpenLayers.hasPendingSwap === "function"
+                    && window.ForecastMapOpenLayers.hasPendingSwap()) {
                 return [nu, true, false];
             }
             window.__forecastTimelineProgrammatic = true;
@@ -843,9 +1001,10 @@ def register_callbacks(app: dash.Dash):
         Input("forecast-init-date-picker", "value"),
         Input("variable-dropdown", "value"),
         Input("collections-dropdown", "value"),
-        Input("leadtime-slider", "value"),
+        Input("leadtime-confirm", "data"),
         Input("map-view-mode", "value"),
         Input("map-style-refresh", "data"),
+        State("leadtime-slider", "value"),
         State("display-style", "data"),
         State("map-state", "data"),
         State("leadtime-playing", "data"),
@@ -856,9 +1015,10 @@ def register_callbacks(app: dash.Dash):
         forecast_start_date: str,
         band_index: int,
         collection_ids: list,
-        leadtime: int,
+        leadtime_confirm,
         map_view_mode: str,
         style_refresh,
+        leadtime: int,
         display_style,
         map_state,
         leadtime_playing,
@@ -883,6 +1043,13 @@ def register_callbacks(app: dash.Dash):
         forces a fresh unlocked statistics rebuild even if a pinned range was
         active moments before.
 
+        Leadtime is no longer taken straight from the scrubber. The browser
+        swaps overlay URLs from the published ``leadtimeCogUrls`` cache and
+        writes ``leadtime-confirm`` once scrubbing settles, so playback never
+        waits on Python. Confirms that arrive while playing are dropped unless
+        they carry ``force``; confirms that arrive idle rebuild from the cache
+        when its style still matches, and from the catalogue otherwise.
+
         Leadtime changes while playing (and scrubbing with a known or pinned
         range) reuse the current range so stats are not re-queried
         mid-animation. View-mode changes rebuild tiles for the matching
@@ -894,6 +1061,23 @@ def register_callbacks(app: dash.Dash):
         style = normalise_display_style(display_style)
         locked = bool(style.get("locked"))
         force_stats = triggered == "map-style-refresh"
+
+        force_confirm = False
+        if triggered == "leadtime-confirm":
+            if not isinstance(leadtime_confirm, dict):
+                return no_update, no_update, no_update, no_update
+            force_confirm = bool(leadtime_confirm.get("force"))
+            if leadtime_confirm.get("lead") is not None:
+                leadtime = leadtime_confirm["lead"]
+            # The browser owns the frame while playing; confirming every step
+            # would queue a Python rebuild behind each tick.
+            if leadtime_playing and not force_confirm:
+                return no_update, no_update, no_update, no_update
+        leadtime_only = triggered == "leadtime-confirm" and not force_confirm
+        if triggered == "forecast-init-date-picker":
+            # update_leadtime_slider rewinds the scrubber for a new init, so
+            # the step held in State belongs to the previous forecast.
+            leadtime = 0
 
         # A new variable must not keep a pinned range from the previous band.
         if triggered == "variable-dropdown" and locked:
@@ -925,13 +1109,20 @@ def register_callbacks(app: dash.Dash):
             engine = resolve_engine_for_mode(mode)
             mode_control = mode if mode != ui_mode else no_update
 
-        def _publish(layer_entries, next_style):
+        def _publish(layer_entries, next_style, *, leadtime_cog_urls):
             next_state = build_map_state(
                 previous=map_state,
                 engine=engine,
                 mode=mode,
                 layers=layer_entries,
                 view=view,
+                leadtime_cog_urls=leadtime_cog_urls,
+                lead=leadtime,
+                # Warm the next step so a play tick or a forward scrub finds
+                # the tiles already in the browser and tiler caches.
+                prefetch_layers=layers_from_leadtime_cog_urls(
+                    leadtime_cog_urls, (leadtime or 0) + 1
+                ),
             )
             leaflet_children = (
                 _build_leaflet_overlays(layer_entries)
@@ -949,7 +1140,7 @@ def register_callbacks(app: dash.Dash):
         if not forecast_start_date or band_index is None:
             if triggered != "map-view-mode":
                 return no_update, no_update, no_update, no_update
-            return _publish([], no_update)
+            return _publish([], no_update, leadtime_cog_urls=None)
 
         stac = _get_stac_client()
         forecast_reference_time_str = date_picker_to_reference_time(forecast_start_date)
@@ -967,6 +1158,19 @@ def register_callbacks(app: dash.Dash):
                 max_val,
                 tile_matrix_set=tile_matrix_set,
                 view_mode=mode,
+            )
+
+        def _cog_urls_for_scale(min_val, max_val):
+            return _build_leadtime_cog_urls(
+                stac,
+                collection_ids,
+                forecast_reference_time_str,
+                band_index,
+                active_colormap,
+                min_val,
+                max_val,
+                tile_matrix_set,
+                mode,
             )
 
         def _style_for(min_val, max_val, *, source: str):
@@ -996,12 +1200,24 @@ def register_callbacks(app: dash.Dash):
                 previous_layers, tile_matrix_set
             )
             if rewritten is not None:
-                return _publish(rewritten, no_update)
+                return _publish(
+                    rewritten,
+                    no_update,
+                    leadtime_cog_urls=rewrite_leadtime_cog_urls_tms(
+                        (map_state or {}).get("leadtimeCogUrls"), tile_matrix_set
+                    ),
+                )
             if "vmin" in style and "vmax" in style:
                 layer_entries = _layers_for_scale(style["vmin"], style["vmax"])
                 if layer_entries:
-                    return _publish(layer_entries, no_update)
-                return _publish([], no_update)
+                    return _publish(
+                        layer_entries,
+                        no_update,
+                        leadtime_cog_urls=_cog_urls_for_scale(
+                            style["vmin"], style["vmax"]
+                        ),
+                    )
+                return _publish([], no_update, leadtime_cog_urls=None)
 
         # Colour map only, unlocked: reuse the current range from display-style.
         if triggered == "colormap-dropdown" and not locked:
@@ -1013,6 +1229,7 @@ def register_callbacks(app: dash.Dash):
                 _style_for(
                     style["vmin"], style["vmax"], source=style.get("source") or "stats"
                 ),
+                leadtime_cog_urls=_cog_urls_for_scale(style["vmin"], style["vmax"]),
             )
 
         # Leadtime scrub/play: keep the current colour scale. Never re-query
@@ -1020,7 +1237,7 @@ def register_callbacks(app: dash.Dash):
         # scale).
         reuse_leadtime_scale = (
             not force_stats
-            and triggered == "leadtime-slider"
+            and leadtime_only
             and (
                 bool(leadtime_playing)
                 or ("vmin" in style and "vmax" in style)
@@ -1031,10 +1248,34 @@ def register_callbacks(app: dash.Dash):
             min_val = style.get("vmin")
             max_val = style.get("vmax")
             if min_val is not None and max_val is not None:
+                cached_cog_urls = (map_state or {}).get("leadtimeCogUrls")
+                if leadtime_cog_urls_match_style(
+                    cached_cog_urls,
+                    tile_matrix_set=tile_matrix_set,
+                    colormap=active_colormap,
+                    rescale=(float(min_val), float(max_val)),
+                    band_index=band_index,
+                    collection_ids=collection_ids,
+                ):
+                    # The published cache already covers this step: build the
+                    # overlay URLs from it instead of walking the catalogue.
+                    layer_entries = layers_from_leadtime_cog_urls(
+                        cached_cog_urls, leadtime
+                    )
+                    if layer_entries:
+                        return _publish(
+                            layer_entries,
+                            no_update,
+                            leadtime_cog_urls=cached_cog_urls,
+                        )
                 layer_entries = _layers_for_scale(min_val, max_val)
                 if not layer_entries:
                     return no_update, no_update, no_update, no_update
-                return _publish(layer_entries, no_update)
+                return _publish(
+                    layer_entries,
+                    no_update,
+                    leadtime_cog_urls=_cog_urls_for_scale(min_val, max_val),
+                )
 
         min_vals: list[float] = []
         max_vals: list[float] = []
@@ -1085,7 +1326,7 @@ def register_callbacks(app: dash.Dash):
         if not layer_specs or not min_vals:
             # View-mode change may leave no fitting layers; still update the host.
             if triggered == "map-view-mode":
-                return _publish([], no_update)
+                return _publish([], no_update, leadtime_cog_urls=None)
             return no_update, no_update, no_update, no_update
 
         # Use first min/max, or optionally min(min_vals)/max(max_vals) for all layers
@@ -1106,13 +1347,17 @@ def register_callbacks(app: dash.Dash):
         )
         if not layer_entries:
             if triggered == "map-view-mode":
-                return _publish([], no_update)
+                return _publish([], no_update, leadtime_cog_urls=None)
             return no_update, no_update, no_update, no_update
 
         next_style = _style_for(
             min_val, max_val, source="user" if (locked and not force_stats) else "stats"
         )
-        return _publish(layer_entries, next_style)
+        return _publish(
+            layer_entries,
+            next_style,
+            leadtime_cog_urls=_cog_urls_for_scale(min_val, max_val),
+        )
 
     @app.callback(
         Output("map-state", "data", allow_duplicate=True),

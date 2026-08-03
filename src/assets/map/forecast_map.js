@@ -9,6 +9,10 @@
  * Tile readiness gates timeline playback: after a new forecast frame is
  * applied, play waits until the active renderer reports tiles loaded (with a
  * safety timeout so a hung tile cannot stall forever).
+ *
+ * Scrubbing and playback swap overlay URLs from the `leadtimeCogUrls` cache
+ * that Python publishes with each rebuild, so a leadtime step paints without
+ * a Dash round trip.
  */
 
 (function (global) {
@@ -22,6 +26,10 @@
   // Playback gates on tilesReady; keep this short so a missed rendercomplete
   // cannot freeze Play for tens of seconds when switching TMS / engines.
   var READY_TIMEOUT_MS = 4000;
+  // Warm the next step only once the current one has had a head start, so
+  // prefetching cannot compete with the tiles the user is waiting on.
+  var PREFETCH_DELAY_MS = 600;
+  var prefetchTimer = null;
   // Optimistic engine switches use revisions above this so a later Python
   // map-state publish (revision N+1) still applies.
   var LOCAL_REVISION_BASE = 1000000000;
@@ -100,6 +108,187 @@
     return (state && state.view && state.view.projection) || "";
   }
 
+  function layerUrlsKey(layers) {
+    if (!layers || !layers.length) {
+      return "";
+    }
+    var parts = [];
+    var i;
+    for (i = 0; i < layers.length; i += 1) {
+      var layer = layers[i];
+      parts.push((layer && layer.id) || "", (layer && layer.tileUrl) || "");
+    }
+    return parts.join("\0");
+  }
+
+  /**
+   * Format a rescale bound the way Python renders a float.
+   *
+   * Whole numbers keep a decimal point so a swapped URL is byte-identical to
+   * the one Python publishes on confirm: identical URLs reuse the tiles the
+   * browser has already fetched instead of requesting them again.
+   */
+  function formatRescaleBound(value) {
+    var number = Number(value);
+    if (!isFinite(number)) {
+      return String(value);
+    }
+    return Number.isInteger(number) ? number.toFixed(1) : String(number);
+  }
+
+  /**
+   * Build overlay layers for one leadtime from the published COG URL cache.
+   *
+   * Mirrors `layers_from_leadtime_cog_urls` in Python so a client-side swap
+   * and a Python confirm produce the same tile URLs.
+   */
+  function layersFromLeadtimeCogUrls(cache, lead) {
+    if (!cache || !cache.collections || lead == null || lead < 0) {
+      return [];
+    }
+    var tilerBase = cache.tilerBase;
+    if (!tilerBase) {
+      return [];
+    }
+    var tms = cache.tileMatrixSet || "WebMercatorQuad";
+    var layers = [];
+    var ids = Object.keys(cache.collections);
+    var i;
+    for (i = 0; i < ids.length; i += 1) {
+      var id = ids[i];
+      var meta = cache.collections[id];
+      var hrefs = meta && meta.hrefs;
+      if (!hrefs || lead >= hrefs.length || !hrefs[lead]) {
+        continue;
+      }
+      var tileUrl =
+        tilerBase.replace(/\/$/, "") +
+        "/cog/tiles/" +
+        tms +
+        "/{z}/{x}/{y}?url=" +
+        hrefs[lead];
+      if (cache.colormap) {
+        tileUrl += "&colormap_name=" + cache.colormap;
+      }
+      if (cache.rescale && cache.rescale.length >= 2) {
+        tileUrl +=
+          "&rescale=" +
+          formatRescaleBound(cache.rescale[0]) +
+          "," +
+          formatRescaleBound(cache.rescale[1]);
+      }
+      if (cache.bidx != null) {
+        tileUrl += "&bidx=" + cache.bidx;
+      }
+      layers.push({
+        id: id,
+        title: id,
+        tileUrl: tileUrl,
+        opacity: 1,
+        visible: true,
+      });
+    }
+    return layers;
+  }
+
+  function hasLeadtimeCogUrls() {
+    return !!(
+      lastState &&
+      lastState.leadtimeCogUrls &&
+      lastState.leadtimeCogUrls.collections &&
+      Object.keys(lastState.leadtimeCogUrls.collections).length
+    );
+  }
+
+  /** Drop the cache so a stale forecast cannot be swapped in. */
+  function clearLeadtimeCogUrls() {
+    if (!lastState) {
+      return;
+    }
+    lastState = Object.assign({}, lastState, { leadtimeCogUrls: null });
+  }
+
+  function schedulePrefetch(state) {
+    if (prefetchTimer) {
+      clearTimeout(prefetchTimer);
+      prefetchTimer = null;
+    }
+    var layers = state && state.prefetchLayers;
+    if (
+      !layers ||
+      !layers.length ||
+      !global.ForecastMapOpenLayers ||
+      typeof global.ForecastMapOpenLayers.prefetchLayers !== "function"
+    ) {
+      return;
+    }
+    prefetchTimer = setTimeout(function () {
+      prefetchTimer = null;
+      // A newer frame arrived while waiting; its own prefetch takes over.
+      if (lastState !== state) {
+        return;
+      }
+      global.ForecastMapOpenLayers.prefetchLayers(layers, {
+        maxTiles: 6,
+        zDelta: -1,
+      });
+    }, PREFETCH_DELAY_MS);
+  }
+
+  /**
+   * Swap overlay URLs for a leadtime step using the published COG URL cache.
+   *
+   * Called from a clientside Dash callback on slider change so tile requests
+   * start before Python confirms the step.
+   */
+  function applyLeadtimeIndex(lead) {
+    if (lead == null || !lastState) {
+      return false;
+    }
+    var nextLead = Number(lead);
+    var layers = layersFromLeadtimeCogUrls(lastState.leadtimeCogUrls, nextLead);
+    if (!layers.length) {
+      return false;
+    }
+    if (activeEngine !== "openlayers") {
+      // Other hosts still wait on Python; keep the tracked lead in step.
+      lastState = Object.assign({}, lastState, {
+        layers: layers,
+        lead: nextLead,
+      });
+      return false;
+    }
+    if (layerUrlsKey(lastState.layers) === layerUrlsKey(layers)) {
+      setTilesReady(true);
+      return true;
+    }
+    var previousLead = lastState.lead;
+    // A jump of more than one step (first / last, long drag) would show a
+    // mottled mix of old and new tiles, so hold the incoming frame back.
+    var holdUntilReady =
+      previousLead != null &&
+      !isNaN(Number(previousLead)) &&
+      Math.abs(nextLead - Number(previousLead)) > 1;
+    lastState = Object.assign({}, lastState, {
+      layers: layers,
+      lead: nextLead,
+    });
+    if (
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.applyLeadtime === "function"
+    ) {
+      // The renderer reports readiness itself; play pacing then waits on
+      // hasPendingSwap rather than on this frame.
+      global.ForecastMapOpenLayers.applyLeadtime(layers, {
+        holdUntilReady: holdUntilReady,
+      });
+    } else {
+      setTilesReady(true);
+    }
+    schedulePrefetch(lastState);
+    return true;
+  }
+
   function applyState(state) {
     if (!state) {
       return;
@@ -128,12 +317,21 @@
       global.ForecastMapOpenLayers &&
       typeof global.ForecastMapOpenLayers.applyLeadtime === "function"
     ) {
+      // A confirm for a step the browser already swapped in needs no repaint.
+      if (layerUrlsKey(previous.layers) === layerUrlsKey(layers)) {
+        setTilesReady(true);
+        schedulePrefetch(state);
+        return;
+      }
       if (layers.length) {
         setTilesReady(false);
       } else {
         setTilesReady(true);
       }
-      global.ForecastMapOpenLayers.applyLeadtime(layers);
+      global.ForecastMapOpenLayers.applyLeadtime(layers, {
+        holdUntilReady: true,
+      });
+      schedulePrefetch(state);
       return;
     }
 
@@ -244,10 +442,16 @@
     } else if (lastState.view && tms === "WebMercatorQuad") {
       view = lastState.view;
     }
+    // Keep the cache on the new tile matrix set so a scrub before Python
+    // confirms does not swap back to the previous projection's tiles.
+    var nextCogUrls = lastState.leadtimeCogUrls
+      ? Object.assign({}, lastState.leadtimeCogUrls, { tileMatrixSet: tms })
+      : lastState.leadtimeCogUrls;
     var next = Object.assign({}, lastState, {
       engine: engine,
       mode: mode,
       layers: rewriteLayersTms(lastState.layers || [], tms),
+      leadtimeCogUrls: nextCogUrls,
       revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
     });
     if (view) {
@@ -260,6 +464,10 @@
     applyState: applyState,
     applyEngine: applyEngine,
     applyViewMode: applyViewMode,
+    applyLeadtimeIndex: applyLeadtimeIndex,
+    layersFromLeadtimeCogUrls: layersFromLeadtimeCogUrls,
+    hasLeadtimeCogUrls: hasLeadtimeCogUrls,
+    clearLeadtimeCogUrls: clearLeadtimeCogUrls,
     setTilesReady: setTilesReady,
     isTilesReady: isTilesReady,
   };

@@ -5,6 +5,10 @@
 
   var HOST_ID = "forecast-map-ol";
   var forecastLayersById = {};
+  // Leadtime / style swaps in flight: the incoming tiles paint above the
+  // stable overlay so the previous step stays visible until they are ready.
+  var pendingById = {};
+  var transitionGeneration = 0;
   var map = null;
   var basemapLayer = null;
   var basemapUrl = null;
@@ -38,12 +42,198 @@
   }
 
   function refreshOverlaySources() {
+    Object.keys(pendingById).forEach(cancelPending);
     Object.keys(forecastLayersById).forEach(function (layerId) {
       var layer = forecastLayersById[layerId];
       var url = layerSourceUrl(layer);
       if (url) {
         layer.setSource(createXyzSource(url, currentTileGrid));
       }
+    });
+  }
+
+  function cancelPending(layerId) {
+    var pending = pendingById[layerId];
+    if (!pending) {
+      return;
+    }
+    if (pending.timeout) {
+      clearTimeout(pending.timeout);
+    }
+    if (pending.onRender && map) {
+      map.un("rendercomplete", pending.onRender);
+    }
+    if (pending.source && pending.onTileStart) {
+      pending.source.un("tileloadstart", pending.onTileStart);
+      pending.source.un("tileloadend", pending.onTileEnd);
+      pending.source.un("tileloaderror", pending.onTileEnd);
+    }
+    if (map && pending.layer) {
+      map.removeLayer(pending.layer);
+    }
+    delete pendingById[layerId];
+  }
+
+  function hasPendingSwap() {
+    return Object.keys(pendingById).length > 0;
+  }
+
+  /**
+   * Stack a new XYZ source above the stable overlay and promote it once ready.
+   *
+   * The default is a progressive reveal: unloaded tiles are transparent so the
+   * previous step shows through. For jumps (`holdUntilReady`) the incoming
+   * layer stays invisible until its viewport tiles have loaded, then cuts over
+   * in one go so the user never sees a patchwork of two steps.
+   */
+  function beginSmoothSwap(layerId, layerDesc, index, options) {
+    var holdUntilReady = !!(options && options.holdUntilReady);
+    var zIndex = 100 + index;
+    var targetUrl = layerDesc.tileUrl;
+    var targetOpacity = layerDesc.opacity == null ? 1 : layerDesc.opacity;
+    var existingPending = pendingById[layerId];
+    if (existingPending && layerSourceUrl(existingPending.layer) === targetUrl) {
+      existingPending.zIndex = zIndex;
+      existingPending.holdUntilReady = holdUntilReady;
+      if (!holdUntilReady) {
+        existingPending.layer.setOpacity(targetOpacity);
+      }
+      existingPending.layer.setVisible(layerDesc.visible !== false);
+      return;
+    }
+    cancelPending(layerId);
+
+    var generation = (transitionGeneration += 1);
+    var source = createXyzSource(targetUrl, currentTileGrid);
+    var incoming = new ol.layer.Tile({
+      source: source,
+      opacity: holdUntilReady ? 0 : targetOpacity,
+      visible: layerDesc.visible !== false,
+      zIndex: zIndex + 50,
+    });
+
+    var entry = {
+      layer: incoming,
+      source: source,
+      generation: generation,
+      zIndex: zIndex,
+      holdUntilReady: holdUntilReady,
+      timeout: null,
+      onRender: null,
+      onTileStart: null,
+      onTileEnd: null,
+    };
+    pendingById[layerId] = entry;
+
+    var finished = false;
+    var tilesLoading = 0;
+    var tilesDone = 0;
+    var armed = false;
+
+    function finish() {
+      if (finished) {
+        return;
+      }
+      var current = pendingById[layerId];
+      if (!current || current.generation !== generation) {
+        return;
+      }
+      finished = true;
+      if (entry.timeout) {
+        clearTimeout(entry.timeout);
+        entry.timeout = null;
+      }
+      if (entry.onRender) {
+        map.un("rendercomplete", entry.onRender);
+        entry.onRender = null;
+      }
+      if (entry.onTileStart) {
+        source.un("tileloadstart", entry.onTileStart);
+        source.un("tileloadend", entry.onTileEnd);
+        source.un("tileloaderror", entry.onTileEnd);
+        entry.onTileStart = null;
+        entry.onTileEnd = null;
+      }
+      incoming.setOpacity(targetOpacity);
+      var old = forecastLayersById[layerId];
+      if (old && old !== incoming) {
+        map.removeLayer(old);
+      }
+      incoming.setZIndex(zIndex);
+      forecastLayersById[layerId] = incoming;
+      delete pendingById[layerId];
+    }
+
+    function tryFinishHold() {
+      if (!armed || finished || !entry.holdUntilReady) {
+        return;
+      }
+      if (tilesLoading > 0 || tilesDone < 1) {
+        return;
+      }
+      finish();
+    }
+
+    if (holdUntilReady) {
+      entry.onTileStart = function () {
+        tilesLoading += 1;
+      };
+      entry.onTileEnd = function () {
+        tilesLoading = Math.max(0, tilesLoading - 1);
+        tilesDone += 1;
+        tryFinishHold();
+      };
+      source.on("tileloadstart", entry.onTileStart);
+      source.on("tileloadend", entry.onTileEnd);
+      source.on("tileloaderror", entry.onTileEnd);
+    }
+
+    map.addLayer(incoming);
+
+    requestAnimationFrame(function () {
+      if (!pendingById[layerId] || pendingById[layerId].generation !== generation) {
+        return;
+      }
+      if (holdUntilReady) {
+        // Two frames so OpenLayers can queue the viewport tile range first.
+        requestAnimationFrame(function () {
+          if (
+            !pendingById[layerId] ||
+            pendingById[layerId].generation !== generation
+          ) {
+            return;
+          }
+          armed = true;
+          tryFinishHold();
+          entry.onRender = function () {
+            if (tilesLoading > 0) {
+              return;
+            }
+            if (tilesDone >= 1) {
+              finish();
+              return;
+            }
+            // Cached tiles can skip load events: promote after an idle frame.
+            requestAnimationFrame(function () {
+              if (tilesLoading > 0 || finished) {
+                return;
+              }
+              finish();
+            });
+          };
+          map.once("rendercomplete", entry.onRender);
+          map.render();
+        });
+        entry.timeout = setTimeout(finish, 2000);
+        return;
+      }
+
+      entry.onRender = function () {
+        finish();
+      };
+      map.once("rendercomplete", entry.onRender);
+      map.render();
+      entry.timeout = setTimeout(finish, 1500);
     });
   }
 
@@ -286,10 +476,12 @@
     refreshOverlaySources();
   }
 
-  function syncLayers(layers) {
+  function syncLayers(layers, options) {
     if (!map) {
       return;
     }
+    var smooth = !!(options && options.smooth);
+    var holdUntilReady = !!(options && options.holdUntilReady);
     var nextIds = {};
     var i;
     var layer;
@@ -305,6 +497,7 @@
       nextIds[layer.id] = true;
       existing = forecastLayersById[layer.id];
       if (!existing) {
+        cancelPending(layer.id);
         tileLayer = new ol.layer.Tile({
           source: createXyzSource(layer.tileUrl, currentTileGrid),
           opacity: layer.opacity == null ? 1 : layer.opacity,
@@ -317,7 +510,17 @@
       }
 
       if (layerSourceUrl(existing) !== layer.tileUrl) {
+        if (smooth) {
+          beginSmoothSwap(layer.id, layer, i, {
+            holdUntilReady: holdUntilReady,
+          });
+          continue;
+        }
+        cancelPending(layer.id);
         existing.setSource(createXyzSource(layer.tileUrl, currentTileGrid));
+      } else {
+        // The stable layer already shows this URL; drop any stale swap.
+        cancelPending(layer.id);
       }
       existing.setOpacity(layer.opacity == null ? 1 : layer.opacity);
       existing.setVisible(layer.visible !== false);
@@ -328,9 +531,84 @@
       if (nextIds[layerId]) {
         return;
       }
+      cancelPending(layerId);
       map.removeLayer(forecastLayersById[layerId]);
       delete forecastLayersById[layerId];
     });
+    Object.keys(pendingById).forEach(function (layerId) {
+      if (!nextIds[layerId]) {
+        cancelPending(layerId);
+      }
+    });
+  }
+
+  /**
+   * Warm tile URLs for the current viewport so the next step paints sooner.
+   *
+   * Capped so warming the next leadtime cannot flood TiTiler and starve the
+   * step the user is actually looking at.
+   */
+  function prefetchLayers(layers, options) {
+    if (!map || !layers || !layers.length || !mapHasSize()) {
+      return;
+    }
+    var view = map.getView();
+    if (!view) {
+      return;
+    }
+    var z = view.getZoom();
+    if (z == null || isNaN(z)) {
+      return;
+    }
+    z = Math.round(z);
+    var zDelta = options && options.zDelta != null ? Number(options.zDelta) : 0;
+    if (!isNaN(zDelta) && zDelta) {
+      z = Math.max(0, z + zDelta);
+    }
+    var tileGrid =
+      currentTileGrid ||
+      ol.tilegrid.createXYZ({
+        extent: ol.proj.get("EPSG:3857").getExtent(),
+        maxZoom: 22,
+      });
+    var range;
+    try {
+      range = tileGrid.getTileRangeForExtentAndZ(
+        view.calculateExtent(map.getSize()),
+        z
+      );
+    } catch (err) {
+      return;
+    }
+    if (!range) {
+      return;
+    }
+    var maxTiles =
+      options && options.maxTiles != null ? Number(options.maxTiles) : 8;
+    if (isNaN(maxTiles) || maxTiles < 1) {
+      maxTiles = 8;
+    }
+    var queued = 0;
+    var i;
+    var x;
+    var y;
+    for (i = 0; i < layers.length; i += 1) {
+      var template = layers[i] && layers[i].tileUrl;
+      if (!template || typeof template !== "string") {
+        continue;
+      }
+      for (x = range.minX; x <= range.maxX && queued < maxTiles; x += 1) {
+        for (y = range.minY; y <= range.maxY && queued < maxTiles; y += 1) {
+          var image = new Image();
+          image.crossOrigin = "anonymous";
+          image.src = template
+            .replace("{z}", String(z))
+            .replace("{x}", String(x))
+            .replace("{y}", String(y));
+          queued += 1;
+        }
+      }
+    }
   }
 
   function setHostVisible(visible) {
@@ -372,9 +650,21 @@
       if (generation !== applyGeneration) {
         return;
       }
-      map.once("rendercomplete", function () {
+      var attempts = 0;
+      function tryReady() {
+        if (generation !== applyGeneration) {
+          return;
+        }
+        // Held swaps stay pending until their incoming tiles have loaded.
+        if (hasPendingSwap() && attempts < 60) {
+          attempts += 1;
+          map.once("rendercomplete", tryReady);
+          map.render();
+          return;
+        }
         markTilesReady(generation);
-      });
+      }
+      map.once("rendercomplete", tryReady);
       map.render();
     });
   }
@@ -382,8 +672,11 @@
   /**
    * Swap forecast overlay URLs for a new leadtime without changing view or
    * basemap. Used so scrub/play keep the user's zoom and centre.
+   *
+   * @param {Array} layers
+   * @param {{holdUntilReady?: boolean}} [options]
    */
-  function applyLeadtime(layers) {
+  function applyLeadtime(layers, options) {
     if (!ensureMap()) {
       if (global.ForecastMap && global.ForecastMap.setTilesReady) {
         global.ForecastMap.setTilesReady(true);
@@ -391,9 +684,19 @@
       return;
     }
     var generation = (applyGeneration += 1);
-    syncLayers(layers || []);
+    var holdUntilReady = !!(options && options.holdUntilReady);
+    if (holdUntilReady) {
+      // Warm the jump target so the held frame can cut over quickly.
+      prefetchLayers(layers || [], { maxTiles: 16, zDelta: 0 });
+    }
+    // The previous step stays painted until the new tiles load (no blank frame).
+    syncLayers(layers || [], {
+      smooth: true,
+      holdUntilReady: holdUntilReady,
+    });
     // Do not wait on rendercomplete for leadtime ticks - that stalls Play when
-    // the event is missed while next/prev still move the slider.
+    // the event is missed while next/prev still move the slider. Playback pace
+    // uses hasPendingSwap instead.
     markTilesReady(generation);
   }
 
@@ -416,13 +719,14 @@
     if (projectionUnchanged) {
       // Leadtime / style / TMS confirmation: swap overlays only.
       setBasemap(state.basemap, state.view && state.view.showBasemap);
-      syncLayers(state.layers);
+      syncLayers(state.layers, { smooth: true });
       markTilesReady(generation);
       return;
     }
     applyView(state.view);
     setBasemap(state.basemap, state.view && state.view.showBasemap);
-    syncLayers(state.layers);
+    // Hard swap on a projection change: the tile grid and CRS must rebuild.
+    syncLayers(state.layers, { smooth: false });
     tryPendingFit();
     // Tiles requested at 0x0 stay cached for the same z/x/y after layout.
     // Flag that case and refresh once ResizeObserver (or a later apply) has size.
@@ -442,5 +746,7 @@
   global.ForecastMapOpenLayers = {
     applyState: applyState,
     applyLeadtime: applyLeadtime,
+    prefetchLayers: prefetchLayers,
+    hasPendingSwap: hasPendingSwap,
   };
 })(window);

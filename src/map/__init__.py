@@ -1,6 +1,8 @@
 from .asset_urls import to_tiler_asset_url
 from .leadtime_cog_urls import (
+    build_leadtime_cog_urls,
     layers_from_leadtime_cog_urls,
+    leadtime_cog_urls_match_style,
     rewrite_leadtime_cog_urls_style,
     rewrite_leadtime_cog_urls_tms,
 )
@@ -44,6 +46,7 @@ __all__ = [
     "MapViewMode",
     "bbox_fits_view_mode",
     "build_cog_tile_url",
+    "build_leadtime_cog_urls",
     "build_map_state",
     "clear_tile_grid_cache",
     "collection_fits_view_mode",
@@ -53,6 +56,7 @@ __all__ = [
     "is_custom_tms_mode",
     "label_for_view_mode",
     "layers_from_leadtime_cog_urls",
+    "leadtime_cog_urls_match_style",
     "list_custom_epsg_tms_ids",
     "list_view_mode_options",
     "list_view_mode_presets",
