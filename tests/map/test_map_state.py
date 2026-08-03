@@ -14,6 +14,9 @@ def test_initial_map_state_defaults_to_openlayers_global():
     assert state["engine"] == "openlayers"
     assert state["mode"] == "global_3857"
     assert state["layers"] == []
+    assert state["prefetchLayers"] == []
+    assert state["leadtimeCogUrls"] is None
+    assert state["lead"] is None
     assert state["revision"] == 0
     assert state["view"]["projection"] == "EPSG:3857"
     assert state["view"]["showBasemap"] is True
@@ -65,3 +68,71 @@ def test_build_map_state_bumps_revision_only_when_content_changes():
     )
     assert changed["revision"] == 1
     assert len(changed["layers"]) == 1
+
+
+def test_build_map_state_includes_prefetch_layers():
+    previous = initial_map_state()
+    prefetch = [
+        {
+            "id": "demo",
+            "tileUrl": "http://example/next/{z}/{x}/{y}",
+            "opacity": 1,
+            "visible": True,
+        }
+    ]
+    changed = build_map_state(
+        previous=previous,
+        engine="openlayers",
+        mode="global_3857",
+        layers=[],
+        prefetch_layers=prefetch,
+    )
+    assert changed["revision"] == 1
+    assert changed["prefetchLayers"] == prefetch
+
+
+def test_build_map_state_includes_leadtime_cog_urls_and_lead():
+    previous = initial_map_state()
+    cache = {
+        "tilerBase": "http://tiler",
+        "tileMatrixSet": "WebMercatorQuad",
+        "colormap": "blues_r",
+        "rescale": [0.0, 1.0],
+        "bidx": 1,
+        "collections": {
+            "demo": {"hrefs": ["file:///data/a.tif", "file:///data/b.tif"]}
+        },
+    }
+    changed = build_map_state(
+        previous=previous,
+        engine="openlayers",
+        mode="global_3857",
+        layers=[],
+        leadtime_cog_urls=cache,
+        lead=3,
+    )
+    assert changed["revision"] == 1
+    assert changed["leadtimeCogUrls"] == cache
+    assert changed["lead"] == 3
+
+    # Omitting leadtime_cog_urls keeps the previous cache.
+    kept = build_map_state(
+        previous=changed,
+        engine="openlayers",
+        mode="global_3857",
+        layers=changed["layers"],
+        lead=4,
+    )
+    assert kept["leadtimeCogUrls"] == cache
+    assert kept["lead"] == 4
+
+    cleared = build_map_state(
+        previous=kept,
+        engine="openlayers",
+        mode="global_3857",
+        layers=[],
+        leadtime_cog_urls=None,
+        lead=None,
+    )
+    assert cleared["leadtimeCogUrls"] is None
+    assert cleared["lead"] is None

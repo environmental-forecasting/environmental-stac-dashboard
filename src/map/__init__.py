@@ -1,4 +1,9 @@
 from .asset_urls import to_tiler_asset_url
+from .leadtime_cog_urls import (
+    layers_from_leadtime_cog_urls,
+    rewrite_leadtime_cog_urls_style,
+    rewrite_leadtime_cog_urls_tms,
+)
 from .projections import (
     WEB_MERCATOR_QUAD,
     MapEngine,
@@ -20,7 +25,12 @@ from .projections import (
     view_mode_and_hint,
 )
 from .state import build_map_state, initial_map_state
-from .tile_urls import build_cog_tile_url, rewrite_layer_entries_tms
+from .tile_urls import (
+    build_cog_tile_url,
+    rewrite_layer_entries_style,
+    rewrite_layer_entries_tms,
+    rewrite_tile_url_style,
+)
 from .tms_client import (
     clear_tile_grid_cache,
     get_tile_grid,
@@ -42,6 +52,7 @@ __all__ = [
     "initial_map_state",
     "is_custom_tms_mode",
     "label_for_view_mode",
+    "layers_from_leadtime_cog_urls",
     "list_custom_epsg_tms_ids",
     "list_view_mode_options",
     "list_view_mode_presets",
@@ -50,7 +61,11 @@ __all__ = [
     "resolve_mode_and_engine",
     "resolve_engine_for_mode",
     "resolve_view_mode",
+    "rewrite_layer_entries_style",
     "rewrite_layer_entries_tms",
+    "rewrite_leadtime_cog_urls_style",
+    "rewrite_leadtime_cog_urls_tms",
+    "rewrite_tile_url_style",
     "tile_grid_from_tms",
     "tile_matrix_set_for_mode",
     "to_tiler_asset_url",
