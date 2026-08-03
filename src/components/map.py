@@ -36,6 +36,16 @@ leaflet_map = html.Div(
     className="forecast-map-root",
     children=[
         html.Div(
+            [
+                html.Span(className="forecast-busy__spinner", **{"aria-hidden": "true"}),
+                html.Span(id="forecast-busy-label", children="Updating…"),
+            ],
+            id="forecast-busy",
+            className="forecast-busy is-hidden",
+            role="status",
+            **{"aria-live": "polite"},
+        ),
+        html.Div(
             className="forecast-map-hosts",
             children=[
                 html.Div(

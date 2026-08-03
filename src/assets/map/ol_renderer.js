@@ -674,7 +674,7 @@
    * basemap. Used so scrub/play keep the user's zoom and centre.
    *
    * @param {Array} layers
-   * @param {{holdUntilReady?: boolean}} [options]
+   * @param {{holdUntilReady?: boolean, waitForTiles?: boolean}} [options]
    */
   function applyLeadtime(layers, options) {
     if (!ensureMap()) {
@@ -685,6 +685,7 @@
     }
     var generation = (applyGeneration += 1);
     var holdUntilReady = !!(options && options.holdUntilReady);
+    var waitForPaint = !!(options && options.waitForTiles);
     if (holdUntilReady) {
       // Warm the jump target so the held frame can cut over quickly.
       prefetchLayers(layers || [], { maxTiles: 16, zDelta: 0 });
@@ -694,9 +695,13 @@
       smooth: true,
       holdUntilReady: holdUntilReady,
     });
-    // Do not wait on rendercomplete for leadtime ticks - that stalls Play when
-    // the event is missed while next/prev still move the slider. Playback pace
-    // uses hasPendingSwap instead.
+    // Scrub/play must not wait on rendercomplete: that stalls when the event
+    // is missed. Playback pace uses hasPendingSwap instead. Date / variable
+    // rebuilds pass waitForTiles so the busy banner stays until paint.
+    if (waitForPaint) {
+      waitForTiles(generation);
+      return;
+    }
     markTilesReady(generation);
   }
 

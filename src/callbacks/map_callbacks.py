@@ -57,6 +57,8 @@ from map import (
 from .display_style import cbar_ramp_style, cbar_slider_step, normalise_display_style
 from .utils import get_cog_band_statistics, round_2dp
 
+_BUSY_HIDDEN = "forecast-busy is-hidden"
+
 
 @lru_cache(maxsize=1)
 def _get_stac_client() -> STAC:
@@ -391,6 +393,100 @@ def register_callbacks(app: dash.Dash):
         Input("map-state", "data"),
     )
 
+    # Map busy labels: Dash owns the banner text. Soft-swap handoff to
+    # "Loading tiles…" lives in ForecastMap.applyState after map-state lands.
+    app.clientside_callback(
+        """
+        function(collections, date, variable, colormap, confirm, mode, resetClicks, style) {
+            var nu = window.dash_clientside.no_update;
+            var trig = window.dash_clientside.callback_context.triggered_id;
+            if (!trig) {
+                return [nu, nu];
+            }
+            // Locked colormap / style-only edits apply clientside — no wait.
+            if (trig === "colormap-dropdown" && style && style.locked) {
+                return [nu, nu];
+            }
+            // Routine leadtime confirms soft-swap in the browser; only forced
+            // rebuilds (Auto / first paint) should show a map wait.
+            if (trig === "leadtime-confirm") {
+                if (!(confirm && confirm.force)) {
+                    return [nu, nu];
+                }
+                return ["forecast-busy", "Updating map…"];
+            }
+            // Collection / date STAC waits are separate Outputs below.
+            if (trig === "collections-dropdown" || trig === "forecast-init-date-picker") {
+                return [nu, nu];
+            }
+            if (trig === "map-view-mode") {
+                return ["forecast-busy", "Updating view…"];
+            }
+            if (trig === "colorbar-range-reset") {
+                return ["forecast-busy", "Updating colour range…"];
+            }
+            return ["forecast-busy", "Updating map…"];
+        }
+        """,
+        Output("forecast-busy", "className", allow_duplicate=True),
+        Output("forecast-busy-label", "children", allow_duplicate=True),
+        Input("collections-dropdown", "value"),
+        Input("forecast-init-date-picker", "value"),
+        Input("variable-dropdown", "value"),
+        Input("colormap-dropdown", "value"),
+        Input("leadtime-confirm", "data"),
+        Input("map-view-mode", "value"),
+        Input("colorbar-range-reset", "n_clicks"),
+        State("display-style", "data"),
+        prevent_initial_call=True,
+    )
+
+    # STAC busy banner: Dash owns #forecast-busy className/label.
+    app.clientside_callback(
+        """
+        function(collections) {
+            var nu = window.dash_clientside.no_update;
+            if (!collections || (Array.isArray(collections) && collections.length === 0)) {
+                return ["forecast-busy is-hidden", nu];
+            }
+            return ["forecast-busy", "Loading forecast dates…"];
+        }
+        """,
+        Output("forecast-busy", "className", allow_duplicate=True),
+        Output("forecast-busy-label", "children", allow_duplicate=True),
+        Input("collections-dropdown", "value"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(date, collections) {
+            var nu = window.dash_clientside.no_update;
+            if (!date || !collections || (Array.isArray(collections) && collections.length === 0)) {
+                return [nu, nu];
+            }
+            return ["forecast-busy", "Loading variables…"];
+        }
+        """,
+        Output("forecast-busy", "className", allow_duplicate=True),
+        Output("forecast-busy-label", "children", allow_duplicate=True),
+        Input("forecast-init-date-picker", "value"),
+        State("collections-dropdown", "value"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(pageLoad) {
+            return ["forecast-busy", "Loading catalog…"];
+        }
+        """,
+        Output("forecast-busy", "className", allow_duplicate=True),
+        Output("forecast-busy-label", "children", allow_duplicate=True),
+        Input("page-load-trigger", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+
     # Optimistic view-mode switch (engine + TMS + projection; no Python wait).
     app.clientside_callback(
         """
@@ -690,12 +786,13 @@ def register_callbacks(app: dash.Dash):
     )
 
     @app.callback(
-        [Output("collections-dropdown", "options")],
-        [Input("page-load-trigger", "data")],
+        Output("collections-dropdown", "options"),
+        Output("forecast-busy", "className", allow_duplicate=True),
+        Input("page-load-trigger", "data"),
         # Must run on load: page-load-trigger is already True in the layout, so
         # prevent_initial_call=True would skip the only invocation and leave
-        # the dropdown empty.
-        prevent_initial_call=False,
+        # the dropdown empty. initial_duplicate keeps the busy Output legal.
+        prevent_initial_call="initial_duplicate",
     )
     def update_collections(_):
         stac = _get_stac_client()
@@ -707,7 +804,7 @@ def register_callbacks(app: dash.Dash):
         for collection in collections:
             option = {"label": collection.id, "value": collection.id}
             options.append(option)
-        return [options]
+        return options, _BUSY_HIDDEN
 
     @app.callback(
         Output("map-view-mode", "options"),
@@ -730,6 +827,7 @@ def register_callbacks(app: dash.Dash):
             Output("forecast-init-date-picker", "defaultDate"),
             Output("forecast-init-date-picker", "disabledDates"),
             Output("forecast-init-date-picker", "value"),
+            Output("forecast-busy", "className", allow_duplicate=True),
         ],
         [
             Input("page-load-trigger", "data"),
@@ -747,7 +845,7 @@ def register_callbacks(app: dash.Dash):
         load; otherwise list_forecast_inits falls back to a slim Item Search.
         """
         if not collection_ids:
-            return [None, None, None, None, None, None]
+            return [None, None, None, None, None, None, _BUSY_HIDDEN]
 
         stac = _get_stac_client()
         all_forecast_dates: set[datetime] = set()
@@ -778,7 +876,7 @@ def register_callbacks(app: dash.Dash):
 
         if not all_forecast_dates:
             logging.debug("No forecast dates loaded from any selected collection.")
-            return [None, None, None, None, None, None]
+            return [None, None, None, None, None, None, _BUSY_HIDDEN]
 
         sorted_dates = sorted(all_forecast_dates)
         # Date picker and store keys use calendar days (YYYY-MM-DD) only.
@@ -804,11 +902,14 @@ def register_callbacks(app: dash.Dash):
             initial_visible_month,
             disabled_dates,
             no_update,
+            _BUSY_HIDDEN,
         ]
 
     @app.callback(
         Output("variable-dropdown", "options"),
         Output("variable-dropdown", "value"),
+        Output("forecast-busy", "className", allow_duplicate=True),
+        Output("forecast-busy-label", "children", allow_duplicate=True),
         Input("forecast-init-date-picker", "value"),
         Input("collections-dropdown", "value"),
         State("variable-dropdown", "value"),
@@ -820,10 +921,13 @@ def register_callbacks(app: dash.Dash):
 
         Loads variable names through a light catalogue query so the list can
         appear without waiting for a full forecast download. On first load,
-        or when the current choice is gone, pick the first variable.
+        or when the current choice is gone, pick the first variable. On
+        success the busy label switches to map update while tiles paint.
         """
         if not selected_date or not collection_ids:
-            return [], None
+            # Collection-only: leave the dates busy banner alone (owned by
+            # update_forecast_start_dates). Do not hide/show here.
+            return [], None, no_update, no_update
 
         stac = _get_stac_client()
         forecast_reference_time_str = date_picker_to_reference_time(selected_date)
@@ -845,7 +949,7 @@ def register_callbacks(app: dash.Dash):
                 continue
 
         if not combined_vars:
-            return [], None
+            return [], None, _BUSY_HIDDEN, no_update
 
         options = [
             {"label": var_name, "value": band_index}
@@ -853,8 +957,11 @@ def register_callbacks(app: dash.Dash):
         ]
         values = {opt["value"] for opt in options}
         if current_value in values:
-            return options, no_update
-        return options, options[0]["value"]
+            value_out = no_update
+        else:
+            value_out = options[0]["value"]
+        # Dropdown is ready; remaining wait is the map rebuild / tile paint.
+        return options, value_out, "forecast-busy", "Updating map…"
 
     @app.callback(
         Output("time-slider-div", "className"),

@@ -13,6 +13,10 @@
  * Scrubbing and playback swap overlay URLs from the `leadtimeCogUrls` cache
  * that Python publishes with each rebuild, so a leadtime step paints without
  * a Dash round trip.
+ *
+ * Busy banner ownership: Dash owns catalog / dates / variables / map labels
+ * on `#forecast-busy`. This module only shows "Loading tiles…" after a soft
+ * swap or full apply that must wait for paint, so the two sides do not fight.
  */
 
 (function (global) {
@@ -33,6 +37,120 @@
   // Optimistic engine switches use revisions above this so a later Python
   // map-state publish (revision N+1) still applies.
   var LOCAL_REVISION_BASE = 1000000000;
+  var busyTimer = null;
+  var busyVisible = false;
+  // JS only stores a tiles wait here; Dash owns every other busy label.
+  var busyReasons = {};
+  var BUSY_SHOW_DELAY_MS = 220;
+
+  function busyEl() {
+    return document.getElementById("forecast-busy");
+  }
+
+  function busyLabelEl() {
+    return document.getElementById("forecast-busy-label");
+  }
+
+  function busyReasonCount() {
+    return Object.keys(busyReasons).length;
+  }
+
+  function hideBusyChrome() {
+    if (busyTimer) {
+      clearTimeout(busyTimer);
+      busyTimer = null;
+    }
+    if (global.dash_clientside && typeof global.dash_clientside.set_props === "function") {
+      global.dash_clientside.set_props("forecast-busy", {
+        className: "forecast-busy is-hidden",
+      });
+    } else {
+      var el = busyEl();
+      if (el) {
+        el.classList.add("is-hidden");
+      }
+    }
+    busyVisible = false;
+  }
+
+  function showBusyNow() {
+    if (!busyReasonCount()) {
+      hideBusyChrome();
+      return;
+    }
+    var message = busyReasons.tiles || "Loading tiles…";
+    if (global.dash_clientside && typeof global.dash_clientside.set_props === "function") {
+      global.dash_clientside.set_props("forecast-busy", { className: "forecast-busy" });
+      global.dash_clientside.set_props("forecast-busy-label", { children: message });
+    } else {
+      var el = busyEl();
+      var label = busyLabelEl();
+      if (label) {
+        label.textContent = message;
+      }
+      if (el) {
+        el.classList.remove("is-hidden");
+      }
+    }
+    busyVisible = true;
+  }
+
+  function scheduleBusyShow() {
+    if (busyVisible) {
+      showBusyNow();
+      return;
+    }
+    if (busyTimer) {
+      clearTimeout(busyTimer);
+    }
+    busyTimer = setTimeout(function () {
+      busyTimer = null;
+      showBusyNow();
+    }, BUSY_SHOW_DELAY_MS);
+  }
+
+  /**
+   * Mark the UI as waiting on tiles. Only the tiles reason is used here;
+   * Dash writes every other busy label straight onto `#forecast-busy`.
+   */
+  function setBusy(message, reason) {
+    var key = reason || "tiles";
+    if (key !== "tiles") {
+      return;
+    }
+    var next = message || "Loading tiles…";
+    if (busyReasons.tiles === next && busyVisible) {
+      return;
+    }
+    busyReasons.tiles = next;
+    scheduleBusyShow();
+  }
+
+  function clearBusy(reason) {
+    if (reason && reason !== "tiles") {
+      return;
+    }
+    if (reason) {
+      delete busyReasons[reason];
+    } else {
+      busyReasons = {};
+    }
+    if (!busyReasonCount()) {
+      hideBusyChrome();
+    }
+  }
+
+  /**
+   * Drop a Dash "Updating …" wait once map-state has applied with nothing
+   * left to paint. Leave Loading catalog / dates / variables alone.
+   */
+  function endDashMapWait() {
+    var label = busyLabelEl();
+    var text = label ? String(label.textContent || "") : "";
+    if (/^Updating /.test(text) || text === "Updating…") {
+      hideBusyChrome();
+    }
+  }
 
   function clearReadyTimeout() {
     if (readyTimeout) {
@@ -45,12 +163,20 @@
     clearReadyTimeout();
     tilesReady = !!ready;
     if (tilesReady) {
+      // Only clear when this module armed a tiles wait; play/scrub readiness
+      // must not wipe a Dash catalog or map label.
+      if (busyReasons.tiles) {
+        clearBusy("tiles");
+      }
       return;
     }
     // Hung / empty-viewport loads must not block play indefinitely.
     readyTimeout = setTimeout(function () {
       tilesReady = true;
       readyTimeout = null;
+      if (busyReasons.tiles) {
+        clearBusy("tiles");
+      }
     }, READY_TIMEOUT_MS);
   }
 
@@ -294,6 +420,8 @@
       return;
     }
     if (state.revision === lastRevision) {
+      // No visual rebuild, but a Dash round-trip may have finished.
+      endDashMapWait();
       return;
     }
     var previous = lastState;
@@ -320,17 +448,27 @@
       // A confirm for a step the browser already swapped in needs no repaint.
       if (layerUrlsKey(previous.layers) === layerUrlsKey(layers)) {
         setTilesReady(true);
+        endDashMapWait();
         schedulePrefetch(state);
         return;
       }
+      // Date / variable / style rebuilds soft-swap in place. Keep the busy
+      // banner until the new viewport tiles have painted. Scrub/play still
+      // uses applyLeadtimeIndex (no banner).
       if (layers.length) {
         setTilesReady(false);
+        setBusy("Loading tiles…", "tiles");
+        global.ForecastMapOpenLayers.applyLeadtime(layers, {
+          holdUntilReady: true,
+          waitForTiles: true,
+        });
       } else {
         setTilesReady(true);
+        endDashMapWait();
+        global.ForecastMapOpenLayers.applyLeadtime(layers, {
+          holdUntilReady: true,
+        });
       }
-      global.ForecastMapOpenLayers.applyLeadtime(layers, {
-        holdUntilReady: true,
-      });
       schedulePrefetch(state);
       return;
     }
@@ -371,10 +509,13 @@
 
     // New frame: block play until the renderer calls setTilesReady(true).
     // Leaflet has no shared load hook here - treat as ready after apply.
+    // Soft-swap rebuilds own the banner; scrub never calls this path.
     if (layers.length && engine !== "leaflet_legacy") {
       setTilesReady(false);
+      setBusy("Loading tiles…", "tiles");
     } else {
       setTilesReady(true);
+      endDashMapWait();
     }
 
     // Only drive the active host. Inactive renderers stay warm but are not
@@ -395,6 +536,7 @@
 
     if (engine === "leaflet_legacy") {
       setTilesReady(true);
+      endDashMapWait();
     }
   }
 
@@ -470,5 +612,7 @@
     clearLeadtimeCogUrls: clearLeadtimeCogUrls,
     setTilesReady: setTilesReady,
     isTilesReady: isTilesReady,
+    setBusy: setBusy,
+    clearBusy: clearBusy,
   };
 })(window);
