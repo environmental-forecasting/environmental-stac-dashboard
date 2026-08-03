@@ -10,6 +10,7 @@ gunicorn
 pandas
 pystac
 pystac-client
+requests
 rio-tiler
 rioxarray
 pyproj

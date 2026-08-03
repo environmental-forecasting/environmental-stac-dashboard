@@ -2,6 +2,7 @@
 
 import dash_leaflet as dl
 from dash import dcc, html
+from dash_iconify import DashIconify
 from map.state import initial_map_state
 
 # Default settings
@@ -51,6 +52,91 @@ leaflet_map = html.Div(
                     children=[_leaflet_map],
                 ),
             ],
+        ),
+        # Place and lat, lon search box. Suggestions are resolved in Python.
+        html.Div(
+            [
+                html.Button(
+                    DashIconify(icon="tabler:search", width=18, height=18),
+                    id="map-search-show",
+                    n_clicks=0,
+                    type="button",
+                    className="forecast-map-search__show",
+                    title="Show search",
+                    **{"aria-label": "Show search"},
+                ),
+                html.Div(
+                    [
+                        html.Div(
+                            [
+                                html.Button(
+                                    DashIconify(
+                                        icon="tabler:search", width=16, height=16
+                                    ),
+                                    id="map-search-hide",
+                                    n_clicks=0,
+                                    type="button",
+                                    className="forecast-map-search__icon",
+                                    title="Hide search",
+                                    **{"aria-label": "Hide search"},
+                                ),
+                                dcc.Input(
+                                    id="map-search-query",
+                                    type="text",
+                                    placeholder="Search or lat, lon",
+                                    debounce=False,
+                                    n_submit=0,
+                                    className="forecast-map-search__input",
+                                    autoComplete="off",
+                                ),
+                                html.Div(
+                                    [
+                                        html.Button(
+                                            id="map-search-clear",
+                                            n_clicks=0,
+                                            type="button",
+                                            className="forecast-map-search__clear",
+                                            title="Clear",
+                                            **{"aria-label": "Clear search"},
+                                        ),
+                                    ],
+                                    className="forecast-map-search__actions",
+                                ),
+                            ],
+                            id="map-search-field",
+                            className="forecast-map-search__field",
+                        ),
+                        html.Div(
+                            id="map-search-suggestions",
+                            className="forecast-map-search__suggestions",
+                            role="listbox",
+                            # Sentinel so the pattern-matching click callback
+                            # validates before the first search response.
+                            children=[
+                                html.Button(
+                                    id={"type": "map-search-hit", "index": -1},
+                                    n_clicks=0,
+                                    type="button",
+                                    className="forecast-map-search__hit",
+                                    style={"display": "none"},
+                                    tabIndex=-1,
+                                )
+                            ],
+                        ),
+                        html.Div(
+                            id="map-search-status",
+                            className="forecast-map-search__status",
+                        ),
+                        dcc.Store(id="map-search-debounced", data=None),
+                        dcc.Store(id="map-search-hits", data=[]),
+                        dcc.Store(id="map-search-committed", data=None),
+                    ],
+                    id="map-search",
+                    className="forecast-map-search",
+                ),
+            ],
+            id="map-search-shell",
+            className="forecast-map-search-shell",
         ),
         dcc.Store(id="forecast-dates-store", data=None),
         dcc.Store(

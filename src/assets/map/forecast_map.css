@@ -288,6 +288,265 @@
   color: #fff;
 }
 
+/* Place search box over the top-left of the map (frosted panel). */
+.forecast-map-search-shell {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 5;
+  width: min(21.5rem, calc(100% - 8.5rem));
+  pointer-events: none;
+  --search-bg: rgba(48, 58, 78, 0.55);
+  --search-bg-strong: rgba(56, 68, 92, 0.68);
+  --search-border: rgba(255, 255, 255, 0.34);
+  --search-text: #f7f9fc;
+  --search-muted: rgba(230, 236, 248, 0.9);
+  --search-blur: blur(18px) saturate(1.35);
+}
+
+.forecast-map-search-shell > * {
+  pointer-events: auto;
+}
+
+.forecast-map-search-shell.is-collapsed {
+  width: auto;
+}
+
+.forecast-map-search__show {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--search-border);
+  border-radius: 999px;
+  background: var(--search-bg);
+  color: var(--search-text);
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--search-blur);
+  -webkit-backdrop-filter: var(--search-blur);
+}
+
+.forecast-map-search__show:hover {
+  border-color: rgba(122, 168, 247, 0.75);
+  background: var(--search-bg-strong);
+}
+
+.forecast-map-search-shell.is-collapsed .forecast-map-search__show {
+  display: inline-flex;
+}
+
+.forecast-map-search-shell.is-collapsed .forecast-map-search {
+  display: none;
+}
+
+.forecast-map-search {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border: 1px solid var(--search-border);
+  border-radius: 1rem;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.14) 0%,
+      rgba(255, 255, 255, 0.04) 100%
+    ),
+    var(--search-bg);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  backdrop-filter: var(--search-blur);
+  -webkit-backdrop-filter: var(--search-blur);
+  overflow: hidden;
+  color: var(--search-text);
+}
+
+.forecast-map-search__field {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.65rem;
+  padding: 0.2rem 0.35rem 0.2rem 0.85rem;
+}
+
+.forecast-map-search__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  margin: 0 0 0 -0.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--search-muted);
+  cursor: pointer;
+}
+
+.forecast-map-search__icon:hover,
+.forecast-map-search__field:focus-within .forecast-map-search__icon,
+.forecast-map-search.has-results .forecast-map-search__icon {
+  color: #fff;
+  background: rgba(122, 168, 247, 0.28);
+}
+
+.forecast-map-search__input,
+.forecast-map-search__input.dash-input,
+.forecast-map-search__field .dash-input-element {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0.55rem 0.15rem;
+  border: 0;
+  background: transparent;
+  color: var(--search-text) !important;
+  -webkit-text-fill-color: var(--search-text);
+  caret-color: var(--search-text);
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 500;
+  outline: none;
+}
+
+.forecast-map-search__input::placeholder,
+.forecast-map-search__input.dash-input::placeholder,
+.forecast-map-search__field .dash-input-element::placeholder {
+  color: rgba(232, 238, 248, 0.72) !important;
+  -webkit-text-fill-color: rgba(232, 238, 248, 0.72);
+  opacity: 1;
+}
+
+.forecast-map-search__actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.forecast-map-search__clear {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--search-muted);
+  cursor: pointer;
+}
+
+.forecast-map-search__clear::before {
+  content: "";
+  display: block;
+  width: 0.7rem;
+  height: 0.7rem;
+  background:
+    linear-gradient(currentColor, currentColor) center / 0.7rem 1.5px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 1.5px 0.7rem no-repeat;
+  transform: rotate(45deg);
+}
+
+.forecast-map-search__field.has-query .forecast-map-search__clear {
+  display: inline-flex;
+}
+
+.forecast-map-search__clear:hover {
+  color: #fff;
+  background: rgba(122, 168, 247, 0.28);
+}
+
+.forecast-map-search__suggestions {
+  display: none;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  max-height: 16.5rem;
+  overflow: auto;
+}
+
+.forecast-map-search.has-results .forecast-map-search__suggestions {
+  display: flex;
+}
+
+.forecast-map-search__hit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border: 0;
+  border-radius: 0.7rem;
+  background: transparent;
+  color: #f2f5fb;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.forecast-map-search__hit-title {
+  color: #ffffff;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.forecast-map-search__hit-meta {
+  color: rgba(220, 228, 242, 0.9);
+  font-size: 0.74rem;
+}
+
+.forecast-map-search__hit:hover,
+.forecast-map-search__hit:focus,
+.forecast-map-search__hit.is-active {
+  background: rgba(122, 168, 247, 0.24);
+  outline: none;
+}
+
+.forecast-map-search__hit.is-active .forecast-map-search__hit-title {
+  color: #fff;
+}
+
+.forecast-map-search__status {
+  display: none;
+  padding: 0.25rem 0.85rem 0.6rem;
+  color: rgba(230, 236, 248, 0.9);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  line-height: 1.35;
+}
+
+.forecast-map-search__status:not(:empty) {
+  display: block;
+}
+
+.forecast-map-search.has-results .forecast-map-search__status:not(:empty) {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding-top: 0.45rem;
+}
+
+/* Keep zoom clear of the search box. */
+#forecast-map-ol .ol-zoom {
+  top: auto;
+  left: 0.75rem;
+  bottom: 0.75rem;
+}
+
+#forecast-map-leaflet .leaflet-top.leaflet-left {
+  top: auto;
+  bottom: 3.5rem;
+}
+
 /* Controls column + seam. */
 .forecast-controls-seam {
   flex: 0 0 22px;
