@@ -420,7 +420,7 @@ def register_callbacks(app: dash.Dash):
                 return [nu, nu];
             }
             if (trig === "map-view-mode") {
-                return ["forecast-busy", "Updating view…"];
+                return [nu, nu];
             }
             if (trig === "colorbar-range-reset") {
                 return ["forecast-busy", "Updating colour range…"];
