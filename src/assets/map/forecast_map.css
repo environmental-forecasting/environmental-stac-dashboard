@@ -11,6 +11,12 @@
     #001435 70%,
     var(--shell-bottom) 100%
   );
+  /* Shared frosted secondary actions (Auto, Reset defaults, etc.). */
+  --chrome-action-border: 1px solid rgba(255, 255, 255, 0.14);
+  --chrome-action-bg: rgba(255, 255, 255, 0.08);
+  --chrome-action-bg-hover: rgba(255, 255, 255, 0.14);
+  --chrome-action-fg: #e8ecf4;
+  --chrome-action-radius: 8px;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -754,7 +760,8 @@
   letter-spacing: 0.02em;
 }
 
-.forecast-controls-panel label {
+/* Field captions only — do not style dropdown option <label>s (checkbox + text). */
+.forecast-controls-panel > label {
   display: block;
   margin-top: 10px;
   margin-bottom: 4px;
@@ -764,7 +771,7 @@
   letter-spacing: 0.04em;
 }
 
-.forecast-controls-panel label:first-of-type {
+.forecast-controls-panel > label:first-of-type {
   margin-top: 0;
 }
 
@@ -783,20 +790,34 @@
   color: #e8ecf4;
 }
 
-.forecast-controls__action {
-  width: 100%;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.08);
-  color: #e8ecf4;
-  padding: 8px 10px;
-  font-size: 13px;
+.forecast-controls__action,
+.forecast-cbar__auto {
+  border: var(--chrome-action-border);
+  border-radius: var(--chrome-action-radius);
+  background: var(--chrome-action-bg);
+  color: var(--chrome-action-fg);
   font-weight: 500;
   cursor: pointer;
 }
 
-.forecast-controls__action:hover {
-  background: rgba(255, 255, 255, 0.14);
+.forecast-controls__action:hover:not(:disabled),
+.forecast-cbar__auto:hover:not(:disabled) {
+  background: var(--chrome-action-bg-hover);
+}
+
+.forecast-controls__action:disabled,
+.forecast-cbar__auto:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: rgba(0, 0, 0, 0.28);
+  color: #c5cede;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.forecast-controls__action {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
 }
 
 .forecast-controls__reset {
@@ -925,28 +946,10 @@
   flex: 0 0 auto;
   margin: 0;
   padding: 3px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(61, 122, 181, 0.9);
-  color: #f4f7fc;
   font-size: 10px;
-  font-weight: 600;
   letter-spacing: 0.02em;
-  cursor: pointer;
   user-select: none;
   white-space: nowrap;
-}
-
-.forecast-cbar__auto:hover:not(:disabled) {
-  background: rgba(61, 122, 181, 1);
-}
-
-.forecast-cbar__auto:disabled {
-  opacity: 0.4;
-  cursor: default;
-  background: rgba(0, 0, 0, 0.28);
-  color: #c5cede;
-  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .forecast-cbar__ramp-wrap {

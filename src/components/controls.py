@@ -56,6 +56,7 @@ controls_panel = html.Div(
             n_clicks=0,
             type="button",
             title="Clear saved defaults and restore factory settings",
+            disabled=True,
             className="forecast-controls__action forecast-controls__reset",
         ),
     ],

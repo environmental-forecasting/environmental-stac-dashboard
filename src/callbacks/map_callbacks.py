@@ -34,6 +34,7 @@ from user_prefs import (
     DEFAULT_VIEW_MODE,
     display_style_seed_from_prefs,
     merge_user_prefs,
+    normalise_user_prefs,
     preferred_collections,
     preferred_in,
 )
@@ -1910,6 +1911,40 @@ def register_callbacks(app: dash.Dash):
             view_mode=view_mode,
             display_style=display_style,
         )
+
+    @app.callback(
+        Output("user-prefs-reset", "disabled"),
+        Input("collections-dropdown", "value"),
+        Input("forecast-init-date-picker", "value"),
+        Input("variable-dropdown", "value"),
+        Input("colormap-dropdown", "value"),
+        Input("map-view-mode", "value"),
+        Input("display-style", "data"),
+        Input("user-prefs", "data"),
+        prevent_initial_call=False,
+    )
+    def project_reset_defaults_disabled(
+        collection_ids,
+        forecast_start,
+        variable,
+        colormap,
+        view_mode,
+        display_style,
+        user_prefs,
+    ):
+        """Disable Reset when live controls and storage already match factory."""
+        live = merge_user_prefs(
+            collection=collection_ids,
+            forecast_start=forecast_start,
+            variable=variable,
+            colormap=colormap,
+            view_mode=view_mode,
+            display_style=display_style,
+        )
+        # Prefer listening to user-prefs as Input (not State): after Reset clears
+        # storage, this must re-run with the empty store or the button stays on.
+        stored = bool(normalise_user_prefs(user_prefs))
+        return live is None and not stored
 
     @app.callback(
         Output("user-prefs", "data", allow_duplicate=True),
