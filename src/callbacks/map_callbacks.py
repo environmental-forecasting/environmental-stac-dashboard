@@ -403,7 +403,7 @@ def register_callbacks(app: dash.Dash):
             if (!trig) {
                 return [nu, nu];
             }
-            // Locked colormap / style-only edits apply clientside — no wait.
+            // Locked colormap / style-only edits apply clientside - no wait.
             if (trig === "colormap-dropdown" && style && style.locked) {
                 return [nu, nu];
             }
@@ -501,6 +501,76 @@ def register_callbacks(app: dash.Dash):
         Input("map-view-mode", "value"),
         State("map-view-presets", "data"),
         prevent_initial_call=True,
+    )
+
+    # Show north-up controls only for polar / custom EPSG#### modes.
+    app.clientside_callback(
+        """
+        function(mode) {
+            var polar = !!(mode && /^EPSG\\d+$/.test(mode));
+            return polar
+                ? "forecast-map-north-up"
+                : "forecast-map-north-up is-hidden";
+        }
+        """,
+        Output("map-north-up-wrap", "className"),
+        Input("map-view-mode", "value"),
+        prevent_initial_call=False,
+    )
+
+    # Toggle one-shot pick vs continuous lock (mutually exclusive; Esc clears).
+    app.clientside_callback(
+        """
+        function(pickN, lockN, mode) {
+            if (window.__forecastNorthUpOn == null) {
+                window.__forecastNorthUpOn = false;
+            }
+            if (window.__forecastNorthUpLockOn == null) {
+                window.__forecastNorthUpLockOn = false;
+            }
+            var triggered = window.dash_clientside.callback_context.triggered_id;
+            var polar = !!(mode && /^EPSG\\d+$/.test(mode));
+            if (triggered === "map-north-up-btn" && polar && pickN) {
+                if (window.__forecastNorthUpOn) {
+                    // Cancel pick mode without changing orientation.
+                    window.__forecastNorthUpOn = false;
+                } else {
+                    // Enter pick mode (also when already rotated from a prior pick).
+                    window.__forecastNorthUpOn = true;
+                    window.__forecastNorthUpLockOn = false;
+                }
+            } else if (triggered === "map-north-up-lock-btn" && polar && lockN) {
+                window.__forecastNorthUpLockOn = !window.__forecastNorthUpLockOn;
+                if (window.__forecastNorthUpLockOn) {
+                    window.__forecastNorthUpOn = false;
+                }
+            }
+            if (!polar) {
+                window.__forecastNorthUpOn = false;
+                window.__forecastNorthUpLockOn = false;
+            }
+            var on = !!(polar && window.__forecastNorthUpOn);
+            var lockOn = !!(polar && window.__forecastNorthUpLockOn);
+            if (window.ForecastMap) {
+                if (typeof window.ForecastMap.setNorthUpClickEnabled === "function") {
+                    window.ForecastMap.setNorthUpClickEnabled(on);
+                }
+                if (typeof window.ForecastMap.setNorthUpLockEnabled === "function") {
+                    window.ForecastMap.setNorthUpLockEnabled(lockOn);
+                }
+            }
+            return [
+                on ? "forecast-map-north-up__btn is-active" : "forecast-map-north-up__btn",
+                lockOn ? "forecast-map-north-up__btn is-active" : "forecast-map-north-up__btn",
+            ];
+        }
+        """,
+        Output("map-north-up-btn", "className"),
+        Output("map-north-up-lock-btn", "className"),
+        Input("map-north-up-btn", "n_clicks"),
+        Input("map-north-up-lock-btn", "n_clicks"),
+        Input("map-view-mode", "value"),
+        prevent_initial_call=False,
     )
 
     # A new forecast init makes the published COG URLs stale, so drop them

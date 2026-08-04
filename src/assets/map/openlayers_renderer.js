@@ -23,6 +23,14 @@
   // Overlays added while size was 0 need a source refresh once layout runs.
   var overlaysAwaitingSize = false;
   var applyGeneration = 0;
+  // Polar / custom EPSG: click rotates so geographic north is screen-up.
+  var northUpClickEnabled = false;
+  // Continuous lock: re-apply north-up at the view centre while panning.
+  var northUpLockEnabled = false;
+  var northUpFollowRaf = null;
+  // Pause follow during place-search camera moves so setRotation cannot cancel
+  // the in-flight center/zoom animation.
+  var northUpFollowPaused = false;
   // Search result highlight (polygon / bbox / point).
   var placeHighlightLayer = null;
   var placeHighlightSource = null;
@@ -339,6 +347,9 @@
     // User navigation cancels any deferred world-fit so leadtime / resize
     // cannot yank the camera back out to the default extent.
     map.on("pointerdrag", clearPendingFit);
+    map.on("singleclick", onNorthUpClick);
+    attachNorthUpViewListeners(map.getView());
+    syncRotateInteractions();
     var viewport = map.getViewport();
     if (viewport) {
       viewport.addEventListener("wheel", clearPendingFit, { passive: true });
@@ -479,8 +490,17 @@
       map.setView(nextView);
     }
 
+    attachNorthUpViewListeners(nextView);
     // Rebuild overlay sources so polar tiles use the matching tile grid.
     refreshOverlaySources();
+    syncNorthUpCursor();
+    syncPolarRotateControl();
+    syncRotateInteractions();
+    if (northUpLockEnabled && isPolarProjection(currentProjection)) {
+      applyNorthUpAtCenter(false);
+    } else if (northUpLockEnabled) {
+      setNorthUpLockEnabled(false);
+    }
   }
 
   function syncLayers(layers, options) {
@@ -759,6 +779,268 @@
     return !!(code && code !== "EPSG:3857");
   }
 
+  function syncNorthUpCursor() {
+    var host = getHost();
+    if (!host) {
+      return;
+    }
+    if (northUpClickEnabled && isPolarProjection(currentProjection)) {
+      host.classList.add("is-north-up-pick");
+    } else {
+      host.classList.remove("is-north-up-pick");
+    }
+  }
+
+  function syncRotateInteractions() {
+    if (!map) {
+      return;
+    }
+    var allowRotate = !northUpLockEnabled;
+    map.getInteractions().forEach(function (interaction) {
+      if (
+        interaction instanceof ol.interaction.DragRotate ||
+        interaction instanceof ol.interaction.PinchRotate
+      ) {
+        interaction.setActive(allowRotate);
+      }
+    });
+  }
+
+  /**
+   * OpenLayers view rotation that makes geographic north point up at ``coord``.
+   *
+   * Rotation 0 keeps projection +Y screen-up. ``atan2(dx, dy)`` is the
+   * clockwise angle from +Y to the map-space north vector; OL rotation is
+   * also clockwise, but the view transform needs the opposite sign to bring
+   * that vector to screen-up.
+   */
+  function rotationForNorthUp(coordinate, projectionCode) {
+    var lonLat = ol.proj.toLonLat(coordinate, projectionCode);
+    if (!lonLat || lonLat.length < 2) {
+      return 0;
+    }
+    var lon = lonLat[0];
+    var lat = lonLat[1];
+    // Geographic north is undefined at the poles.
+    if (!isFinite(lat) || Math.abs(lat) > 89.5) {
+      return map && map.getView() ? map.getView().getRotation() : 0;
+    }
+    var northLat = Math.max(-90, Math.min(90, lat + 0.05));
+    var northMap = ol.proj.fromLonLat([lon, northLat], projectionCode);
+    if (!northMap) {
+      return 0;
+    }
+    var dx = northMap[0] - coordinate[0];
+    var dy = northMap[1] - coordinate[1];
+    if (!dx && !dy) {
+      return 0;
+    }
+    return -Math.atan2(dx, dy);
+  }
+
+  function applyNorthUpAtCenter(animate) {
+    if (
+      !map ||
+      !northUpLockEnabled ||
+      northUpFollowPaused ||
+      !isPolarProjection(currentProjection)
+    ) {
+      return;
+    }
+    var view = map.getView();
+    if (!view) {
+      return;
+    }
+    var center = view.getCenter();
+    if (!center) {
+      return;
+    }
+    var rotation = rotationForNorthUp(center, currentProjection);
+    // Skip no-op writes: setRotation mid-zoom forces extra tile work.
+    if (Math.abs(view.getRotation() - rotation) < 1e-4) {
+      return;
+    }
+    if (animate) {
+      view.animate({
+        rotation: rotation,
+        duration: 280,
+      });
+    } else {
+      view.setRotation(rotation);
+    }
+  }
+
+  function scheduleNorthUpFollow() {
+    if (
+      !northUpLockEnabled ||
+      northUpFollowPaused ||
+      northUpFollowRaf != null
+    ) {
+      return;
+    }
+    northUpFollowRaf = global.requestAnimationFrame(function () {
+      northUpFollowRaf = null;
+      applyNorthUpAtCenter(false);
+    });
+  }
+
+  function attachNorthUpViewListeners(view) {
+    if (!view || view.__forecastNorthUpBound) {
+      return;
+    }
+    view.__forecastNorthUpBound = true;
+    // Geographic north depends on map centre, not zoom. Listening to
+    // change:resolution called setRotation every wheel frame and made zoom
+    // feel stuck while tiles re-projected.
+    view.on("change:center", scheduleNorthUpFollow);
+  }
+
+  function syncPolarRotateControl() {
+    var host = getHost();
+    if (!host) {
+      return;
+    }
+    // Stock OL rotate arrow tracks projection +Y / view rotation reset, not
+    // geographic north. Hide it in polar modes where North up controls own that.
+    if (isPolarProjection(currentProjection)) {
+      host.classList.add("is-polar-projection");
+    } else {
+      host.classList.remove("is-polar-projection");
+    }
+  }
+
+  function setNorthUpClickEnabled(enabled) {
+    northUpClickEnabled = !!enabled;
+    if (northUpClickEnabled && northUpLockEnabled) {
+      setNorthUpLockEnabled(false);
+    }
+    syncNorthUpCursor();
+  }
+
+  function setNorthUpLockEnabled(enabled) {
+    var wasLocked = northUpLockEnabled;
+    northUpLockEnabled = !!enabled;
+    if (northUpLockEnabled) {
+      northUpClickEnabled = false;
+      syncNorthUpCursor();
+      if (map) {
+        clearPendingFit();
+        attachNorthUpViewListeners(map.getView());
+        applyNorthUpAtCenter(true);
+      }
+    } else {
+      northUpFollowPaused = false;
+      if (northUpFollowRaf != null) {
+        global.cancelAnimationFrame(northUpFollowRaf);
+        northUpFollowRaf = null;
+      }
+      // Turning Keep N up off restores the default projection orientation.
+      if (wasLocked) {
+        animateDefaultOrientation();
+      }
+    }
+    syncRotateInteractions();
+  }
+
+  /** Animate view rotation back to projection +Y up (does not clear modes). */
+  function animateDefaultOrientation() {
+    if (!map) {
+      return;
+    }
+    clearPendingFit();
+    var view = map.getView();
+    if (!view) {
+      return;
+    }
+    if (Math.abs(view.getRotation()) < 1e-4) {
+      return;
+    }
+    view.animate({
+      rotation: 0,
+      duration: 280,
+    });
+  }
+
+  function isOrientationRotated() {
+    if (!map) {
+      return false;
+    }
+    var view = map.getView();
+    return !!(view && Math.abs(view.getRotation()) >= 1e-4);
+  }
+
+  /** Clear north-up follow and animate rotation back to projection +Y up. */
+  function resetOrientation() {
+    if (northUpFollowRaf != null) {
+      global.cancelAnimationFrame(northUpFollowRaf);
+      northUpFollowRaf = null;
+    }
+    northUpLockEnabled = false;
+    northUpFollowPaused = false;
+    northUpClickEnabled = false;
+    syncNorthUpCursor();
+    syncRotateInteractions();
+    animateDefaultOrientation();
+  }
+
+  function resumeNorthUpFollow() {
+    northUpFollowPaused = false;
+    if (northUpLockEnabled) {
+      applyNorthUpAtCenter(false);
+    }
+  }
+
+  /**
+   * Animate center/zoom for place search. With Keep N up, include the
+   * destination rotation in the same animation and pause follow so mid-flight
+   * setRotation cannot cancel the move.
+   */
+  function animatePlaceCamera(view, props) {
+    var duration = props.duration != null ? props.duration : 450;
+    if (
+      northUpLockEnabled &&
+      isPolarProjection(currentProjection) &&
+      props.center
+    ) {
+      northUpFollowPaused = true;
+      view.animate(
+        Object.assign({}, props, {
+          duration: duration,
+          rotation: rotationForNorthUp(props.center, currentProjection),
+        }),
+        resumeNorthUpFollow
+      );
+      return;
+    }
+    view.animate(props);
+  }
+
+  function onNorthUpClick(evt) {
+    if (!northUpClickEnabled || !map) {
+      return;
+    }
+    if (!isPolarProjection(currentProjection)) {
+      return;
+    }
+    clearPendingFit();
+    var view = map.getView();
+    if (!view) {
+      return;
+    }
+    var rotation = rotationForNorthUp(evt.coordinate, currentProjection);
+    view.animate({
+      rotation: rotation,
+      duration: 280,
+    });
+    // One-shot: leave pick mode after applying so the button is not sticky.
+    if (
+      global.ForecastMap &&
+      typeof global.ForecastMap.clearNorthUpPickMode === "function"
+    ) {
+      global.ForecastMap.clearNorthUpPickMode();
+    }
+  }
+
   function clearPlaceHighlight() {
     if (placeHighlightSource) {
       placeHighlightSource.clear();
@@ -982,24 +1264,35 @@
           isFinite(fittedZoom) &&
           fittedZoom < zoom - 0.05
         ) {
-          view.animate({
+          animatePlaceCamera(view, {
             center: center,
             zoom: zoom,
             duration: 450,
           });
           return { ok: true };
         }
-        view.fit(extent, {
-          size: size,
-          padding: [pad, pad, pad, pad],
-          maxZoom: Math.max(zoom, 16),
-          duration: 450,
-        });
+        if (northUpLockEnabled && isPolarProjection(currentProjection)) {
+          northUpFollowPaused = true;
+          view.fit(extent, {
+            size: size,
+            padding: [pad, pad, pad, pad],
+            maxZoom: Math.max(zoom, 16),
+            duration: 450,
+            callback: resumeNorthUpFollow,
+          });
+        } else {
+          view.fit(extent, {
+            size: size,
+            padding: [pad, pad, pad, pad],
+            maxZoom: Math.max(zoom, 16),
+            duration: 450,
+          });
+        }
         return { ok: true };
       }
     }
 
-    view.animate({
+    animatePlaceCamera(view, {
       center: center,
       zoom: isFinite(zoom) ? zoom : 14,
       duration: 450,
@@ -1017,6 +1310,10 @@
     applyLeadtime: applyLeadtime,
     prefetchLayers: prefetchLayers,
     hasPendingSwap: hasPendingSwap,
+    setNorthUpClickEnabled: setNorthUpClickEnabled,
+    setNorthUpLockEnabled: setNorthUpLockEnabled,
+    resetOrientation: resetOrientation,
+    isOrientationRotated: isOrientationRotated,
     flyToPlace: flyToPlace,
     clearLastPlace: clearLastPlace,
   };

@@ -43,6 +43,7 @@
   // JS only stores a tiles wait here; Dash owns every other busy label.
   var busyReasons = {};
   var BUSY_SHOW_DELAY_MS = 220;
+  var northUpEscBound = false;
 
   function busyEl() {
     return document.getElementById("forecast-busy");
@@ -877,6 +878,94 @@
     }
   }
 
+  function setBtnClass(id, className) {
+    var el = document.getElementById(id);
+    if (el) {
+      el.className = className;
+    }
+  }
+
+  function clearNorthUpSelection() {
+    global.__forecastNorthUpOn = false;
+    global.__forecastNorthUpLockOn = false;
+    setNorthUpClickEnabled(false);
+    setNorthUpLockEnabled(false);
+    setBtnClass("map-north-up-btn", "forecast-map-north-up__btn");
+    setBtnClass("map-north-up-lock-btn", "forecast-map-north-up__btn");
+  }
+
+  /** Exit one-shot pick mode after a map click (keep the applied rotation). */
+  function clearNorthUpPickMode() {
+    global.__forecastNorthUpOn = false;
+    setNorthUpClickEnabled(false);
+    setBtnClass("map-north-up-btn", "forecast-map-north-up__btn");
+  }
+
+  function isOrientationRotated() {
+    return !!(
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.isOrientationRotated === "function" &&
+      global.ForecastMapOpenLayers.isOrientationRotated()
+    );
+  }
+
+  function resetOrientation() {
+    clearNorthUpSelection();
+    if (
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.resetOrientation === "function"
+    ) {
+      global.ForecastMapOpenLayers.resetOrientation();
+    }
+  }
+
+  function setNorthUpClickEnabled(enabled) {
+    if (
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.setNorthUpClickEnabled === "function"
+    ) {
+      global.ForecastMapOpenLayers.setNorthUpClickEnabled(enabled);
+    }
+    ensureNorthUpEsc();
+  }
+
+  function setNorthUpLockEnabled(enabled) {
+    if (
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.setNorthUpLockEnabled === "function"
+    ) {
+      global.ForecastMapOpenLayers.setNorthUpLockEnabled(enabled);
+    }
+    ensureNorthUpEsc();
+  }
+
+  function ensureNorthUpEsc() {
+    if (northUpEscBound) {
+      return;
+    }
+    northUpEscBound = true;
+    global.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      var picking = !!global.__forecastNorthUpOn;
+      var locking = !!global.__forecastNorthUpLockOn;
+      var rotated = isOrientationRotated();
+      if (!picking && !locking && !rotated) {
+        return;
+      }
+      if (
+        global.ForecastTimelineKeys &&
+        global.ForecastTimelineKeys.isEditableTarget(event.target)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      // Esc cancels pick/lock and restores default orientation.
+      resetOrientation();
+    });
+  }
+
   global.ForecastMap = {
     applyState: applyState,
     applyEngine: applyEngine,
@@ -891,5 +980,11 @@
     clearBusy: clearBusy,
     flyTo: flyTo,
     clearPlace: clearPlace,
+    setNorthUpClickEnabled: setNorthUpClickEnabled,
+    setNorthUpLockEnabled: setNorthUpLockEnabled,
+    clearNorthUpSelection: clearNorthUpSelection,
+    clearNorthUpPickMode: clearNorthUpPickMode,
+    isOrientationRotated: isOrientationRotated,
+    resetOrientation: resetOrientation,
   };
 })(window);

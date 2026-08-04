@@ -161,6 +161,41 @@ leaflet_map = html.Div(
             id="map-search-shell",
             className="forecast-map-search-shell",
         ),
+        # Polar / custom EPSG: one-shot North up or continuous Keep N up.
+        html.Div(
+            [
+                html.Button(
+                    [
+                        html.Span("N", className="forecast-map-north-up__glyph"),
+                        html.Span("North up", className="forecast-map-north-up__label"),
+                    ],
+                    id="map-north-up-btn",
+                    n_clicks=0,
+                    type="button",
+                    className="forecast-map-north-up__btn",
+                    title=(
+                        "Click the map to put north up at that point. "
+                        "Press Esc to restore default orientation."
+                    ),
+                ),
+                html.Button(
+                    [
+                        html.Span("L", className="forecast-map-north-up__glyph"),
+                        html.Span("Keep N up", className="forecast-map-north-up__label"),
+                    ],
+                    id="map-north-up-lock-btn",
+                    n_clicks=0,
+                    type="button",
+                    className="forecast-map-north-up__btn",
+                    title=(
+                        "Keep geographic north screen-up while panning and zooming. "
+                        "Turn off to restore default orientation."
+                    ),
+                ),
+            ],
+            id="map-north-up-wrap",
+            className="forecast-map-north-up is-hidden",
+        ),
         dcc.Store(id="forecast-dates-store", data=None),
         dcc.Store(
             id="display-style",

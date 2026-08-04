@@ -252,6 +252,94 @@
   }
 }
 
+.forecast-map-north-up {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  left: auto;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+  pointer-events: auto;
+  --map-chrome-bg: rgba(18, 24, 36, 0.28);
+  --map-chrome-bg-strong: rgba(18, 24, 36, 0.42);
+  --map-chrome-border: rgba(255, 255, 255, 0.2);
+  --map-chrome-blur: blur(14px) saturate(1.2);
+}
+
+/* Stock OL rotate control stays hidden in polar; North up / Keep N up own that job. */
+#forecast-map-ol .ol-rotate {
+  top: 9.6rem;
+  right: 0.75rem;
+}
+
+#forecast-map-ol.is-polar-projection .ol-rotate {
+  display: none;
+}
+
+.forecast-map-north-up.is-hidden {
+  display: none;
+}
+
+.forecast-map-north-up__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.4rem 0.7rem 0.4rem 0.45rem;
+  border: 1px solid var(--map-chrome-border);
+  border-radius: 0.5rem;
+  background: var(--map-chrome-bg);
+  color: #d7deea;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  backdrop-filter: var(--map-chrome-blur);
+  -webkit-backdrop-filter: var(--map-chrome-blur);
+}
+
+.forecast-map-north-up__btn:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: var(--map-chrome-bg-strong);
+}
+
+.forecast-map-north-up__btn.is-active {
+  color: #fff;
+  border-color: rgba(91, 141, 239, 0.55);
+  background: rgba(45, 78, 140, 0.55);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.18),
+    0 0 0 1px rgba(91, 141, 239, 0.2);
+}
+
+.forecast-map-north-up__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 0.3rem;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.forecast-map-north-up__btn.is-active .forecast-map-north-up__glyph {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.forecast-map-host.is-north-up-pick {
+  cursor: crosshair;
+}
+
 .forecast-map-hosts {
   width: 100%;
   height: 100%;
