@@ -584,6 +584,12 @@
     lastRevision = state.revision;
     // Keep a copy for optimistic engine switches (before Python round-trips).
     lastState = state;
+    // Used by the Dash clientside nudge: force a rebuild when controls are
+    // ready but overlays never arrived (prefs rehydration race).
+    global._forecastMapLayerCount = (state.layers || []).length;
+    if (global._forecastMapLayerCount > 0) {
+      global._forecastMapNudgeKey = null;
+    }
 
     var engine = state.engine || "openlayers";
     activeEngine = engine;

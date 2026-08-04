@@ -9,7 +9,7 @@ from urllib.parse import urlparse, urlunparse
 import dash
 import dash_leaflet as dl
 import pandas as pd
-from components.controls import DEFAULT_COLORMAP
+from components.controls import AVAILABLE_COLORMAPS, DEFAULT_COLORMAP
 from config import (
     FILE_SERVER_INTERNAL_URL,
     FILE_SERVER_URL,
@@ -30,6 +30,13 @@ from stac.timefmt import (
     step_unit_subtitle,
     to_calendar_day,
 )
+from user_prefs import (
+    DEFAULT_VIEW_MODE,
+    display_style_seed_from_prefs,
+    merge_user_prefs,
+    preferred_collections,
+    preferred_in,
+)
 
 from map import (
     WEB_MERCATOR_QUAD,
@@ -39,6 +46,7 @@ from map import (
     build_cog_tile_url,
     build_leadtime_cog_urls,
     build_map_state,
+    initial_map_state,
     layers_from_leadtime_cog_urls,
     leadtime_cog_urls_match_style,
     list_view_mode_options,
@@ -54,7 +62,12 @@ from map import (
     view_mode_and_hint,
 )
 
-from .display_style import cbar_ramp_style, cbar_slider_step, normalise_display_style
+from .display_style import (
+    DEFAULT_DISPLAY_STYLE,
+    cbar_ramp_style,
+    cbar_slider_step,
+    normalise_display_style,
+)
 from .utils import get_cog_band_statistics, round_2dp
 
 _BUSY_HIDDEN = "forecast-busy is-hidden"
@@ -391,6 +404,46 @@ def register_callbacks(app: dash.Dash):
         """,
         Output("map-bridge-tick", "data"),
         Input("map-state", "data"),
+    )
+
+    # Prefs reload can fill controls without a reliable update_cog_layer
+    # trigger. If overlays are still missing shortly after, force one rebuild.
+    app.clientside_callback(
+        """
+        function(variable, date, collections) {
+            var nu = window.dash_clientside.no_update;
+            var emptyCollections = !collections ||
+                (Array.isArray(collections) && collections.length === 0);
+            if (variable == null || variable === "" || !date || emptyCollections) {
+                return nu;
+            }
+            var key = JSON.stringify([variable, date, collections]);
+            if (window._forecastMapNudgeTimer) {
+                clearTimeout(window._forecastMapNudgeTimer);
+            }
+            window._forecastMapNudgeTimer = setTimeout(function () {
+                window._forecastMapNudgeTimer = null;
+                if ((window._forecastMapLayerCount || 0) > 0) {
+                    return;
+                }
+                if (window._forecastMapNudgeKey === key) {
+                    return;
+                }
+                window._forecastMapNudgeKey = key;
+                if (window.dash_clientside && window.dash_clientside.set_props) {
+                    window.dash_clientside.set_props("map-style-refresh", {
+                        data: {ts: Date.now() / 1000, force_stats: false}
+                    });
+                }
+            }, 800);
+            return nu;
+        }
+        """,
+        Output("map-bridge-tick", "data", allow_duplicate=True),
+        Input("variable-dropdown", "value"),
+        Input("forecast-init-date-picker", "value"),
+        Input("collections-dropdown", "value"),
+        prevent_initial_call=True,
     )
 
     # Map busy labels: Dash owns the banner text. Soft-swap handoff to
@@ -862,14 +915,16 @@ def register_callbacks(app: dash.Dash):
 
     @app.callback(
         Output("collections-dropdown", "options"),
+        Output("collections-dropdown", "value"),
         Output("forecast-busy", "className", allow_duplicate=True),
         Input("page-load-trigger", "data"),
+        State("user-prefs", "data"),
         # Must run on load: page-load-trigger is already True in the layout, so
         # prevent_initial_call=True would skip the only invocation and leave
         # the dropdown empty. initial_duplicate keeps the busy Output legal.
         prevent_initial_call="initial_duplicate",
     )
-    def update_collections(_):
+    def update_collections(_, user_prefs):
         stac = _get_stac_client()
         collections = stac.get_catalog_collection_ids(resolve=True)
         # Reuse summaries on these Collection objects for forecast inits
@@ -879,20 +934,45 @@ def register_callbacks(app: dash.Dash):
         for collection in collections:
             option = {"label": collection.id, "value": collection.id}
             options.append(option)
-        return options, _BUSY_HIDDEN
+        valid_ids = {collection.id for collection in collections}
+        preferred = preferred_collections(user_prefs, valid_ids)
+        # None / empty: leave the multi-select cleared (factory / stale prefs).
+        value = preferred if preferred else None
+        return options, value, _BUSY_HIDDEN
+
+    @app.callback(
+        Output("colormap-dropdown", "value"),
+        Output("display-style", "data", allow_duplicate=True),
+        Input("page-load-trigger", "data"),
+        State("user-prefs", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def apply_style_prefs(_, user_prefs):
+        """Seed colormap and locked colour range from browser prefs on load."""
+        colormap = preferred_in(user_prefs, "colormap", AVAILABLE_COLORMAPS)
+        style_seed = display_style_seed_from_prefs(user_prefs)
+        colormap_out = colormap if colormap else no_update
+        style_out = style_seed if style_seed is not None else no_update
+        if colormap_out is no_update and style_out is no_update:
+            raise PreventUpdate
+        return colormap_out, style_out
 
     @app.callback(
         Output("map-view-mode", "options"),
         Output("map-view-presets", "data"),
+        Output("map-view-mode", "value", allow_duplicate=True),
         Input("page-load-trigger", "data"),
-        prevent_initial_call=False,
+        State("user-prefs", "data"),
+        prevent_initial_call="initial_duplicate",
     )
-    def update_map_view_mode_options(_):
+    def update_map_view_mode_options(_, user_prefs):
         """Populate Global / Leaflet / Globe + custom EPSG#### views."""
-        return (
-            list_view_mode_options(TILER_INTERNAL_URL),
-            list_view_mode_presets(TILER_INTERNAL_URL),
+        options = list_view_mode_options(TILER_INTERNAL_URL)
+        presets = list_view_mode_presets(TILER_INTERNAL_URL)
+        preferred = preferred_in(
+            user_prefs, "view_mode", {opt["value"] for opt in options}
         )
+        return options, presets, preferred if preferred is not None else no_update
 
     @app.callback(
         [
@@ -908,16 +988,20 @@ def register_callbacks(app: dash.Dash):
             Input("page-load-trigger", "data"),
             Input("collections-dropdown", "value"),
         ],
+        State("user-prefs", "data"),
+        State("forecast-init-date-picker", "value"),
         prevent_initial_call=True,
     )
     def update_forecast_start_dates(
-        _, collection_ids: list
+        _, collection_ids: list, user_prefs, current_date
     ) -> list:
         """
         Load available forecast init dates from STAC for the selected collections.
 
         Prefer inits already primed from Collection summaries at dropdown
         load; otherwise list_forecast_inits falls back to a slim Item Search.
+        Seed the picker from browser prefs when the current day is empty or
+        no longer available.
         """
         if not collection_ids:
             return [None, None, None, None, None, None, _BUSY_HIDDEN]
@@ -970,13 +1054,27 @@ def register_callbacks(app: dash.Dash):
             to_calendar_day(d) for d in date_range if d.date() not in available_dates
         ]
 
+        preferred_day = preferred_in(user_prefs, "forecast_start", forecast_dates_dict)
+        current_ok = (
+            isinstance(current_date, str) and current_date in forecast_dates_dict
+        )
+        if current_ok:
+            date_value = no_update
+        elif preferred_day is not None:
+            date_value = preferred_day
+        elif current_date:
+            # Stale day for this collection set; clear rather than leave disabled.
+            date_value = None
+        else:
+            date_value = no_update
+
         return [
             forecast_dates_dict,
             min_date,
             max_date,
             initial_visible_month,
             disabled_dates,
-            no_update,
+            date_value,
             _BUSY_HIDDEN,
         ]
 
@@ -988,16 +1086,19 @@ def register_callbacks(app: dash.Dash):
         Input("forecast-init-date-picker", "value"),
         Input("collections-dropdown", "value"),
         State("variable-dropdown", "value"),
+        State("user-prefs", "data"),
         prevent_initial_call=True,
     )
-    def update_available_variables(selected_date, collection_ids: list, current_value):
+    def update_available_variables(
+        selected_date, collection_ids: list, current_value, user_prefs
+    ):
         """
         Fill the variable dropdown for the selected forecast date.
 
         Loads variable names through a light catalogue query so the list can
-        appear without waiting for a full forecast download. On first load,
-        or when the current choice is gone, pick the first variable. On
-        success the busy label switches to map update while tiles paint.
+        appear without waiting for a full forecast download. Prefer a
+        browser-saved band when it is still offered; otherwise keep the
+        current choice when valid, or pick the first variable.
         """
         if not selected_date or not collection_ids:
             # Collection-only: leave the dates busy banner alone (owned by
@@ -1031,7 +1132,10 @@ def register_callbacks(app: dash.Dash):
             for var_name, band_index in combined_vars.items()
         ]
         values = {opt["value"] for opt in options}
-        if current_value in values:
+        preferred = preferred_in(user_prefs, "variable", values)
+        if preferred is not None:
+            value_out = preferred if preferred != current_value else no_update
+        elif current_value in values:
             value_out = no_update
         else:
             value_out = options[0]["value"]
@@ -1242,7 +1346,12 @@ def register_callbacks(app: dash.Dash):
         triggered = callback_context.triggered_id
         style = normalise_display_style(display_style)
         locked = bool(style.get("locked"))
-        force_stats = triggered == "map-style-refresh"
+        # Auto (no force_stats key) recomputes stats; prefs empty-map nudge
+        # sends force_stats=false so a pinned colourbar is kept.
+        force_stats = triggered == "map-style-refresh" and (
+            not isinstance(style_refresh, dict)
+            or style_refresh.get("force_stats", True)
+        )
 
         force_confirm = False
         if triggered == "leadtime-confirm":
@@ -1262,14 +1371,20 @@ def register_callbacks(app: dash.Dash):
             leadtime = 0
 
         # A new variable must not keep a pinned range from the previous band.
-        if triggered == "variable-dropdown" and locked:
+        # Prefs boot: keep the pin while the map is still empty.
+        if triggered == "variable-dropdown" and locked and (map_state or {}).get(
+            "layers"
+        ):
             locked = False
             style["locked"] = False
             style["source"] = "stats"
 
-        # Locked colormap edits are applied clientside by
-        # apply_locked_display_style; nothing to do here.
-        if triggered == "colormap-dropdown" and locked:
+        # Locked colormap edits are applied clientside once overlays exist.
+        if (
+            triggered == "colormap-dropdown"
+            and locked
+            and (map_state or {}).get("layers")
+        ):
             return no_update, no_update, no_update, no_update
 
         active_colormap = colormap or style.get("colormap") or DEFAULT_COLORMAP
@@ -1318,11 +1433,10 @@ def register_callbacks(app: dash.Dash):
                 mode_control,
             )
 
-        # Allow projection switches before a forecast date is chosen.
+        # View-mode before date/variable must not stamp an empty map-state
+        # (prefs rehydration used to leave the map blank).
         if not forecast_start_date or band_index is None:
-            if triggered != "map-view-mode":
-                return no_update, no_update, no_update, no_update
-            return _publish([], no_update, leadtime_cog_urls=None)
+            return no_update, no_update, no_update, no_update
 
         stac = _get_stac_client()
         forecast_reference_time_str = date_picker_to_reference_time(forecast_start_date)
@@ -1361,7 +1475,8 @@ def register_callbacks(app: dash.Dash):
             next_style["vmin"] = float(min_val)
             next_style["vmax"] = float(max_val)
             next_style["source"] = source
-            next_style["locked"] = False
+            # Keep a user pin across rebuilds that reused the pinned window.
+            next_style["locked"] = source == "user"
             if source == "stats":
                 next_style["domain_min"] = float(min_val)
                 next_style["domain_max"] = float(max_val)
@@ -1399,7 +1514,9 @@ def register_callbacks(app: dash.Dash):
                             style["vmin"], style["vmax"]
                         ),
                     )
-                return _publish([], no_update, leadtime_cog_urls=None)
+            # No reusable overlays yet (e.g. prefs just set the mode): fall
+            # through to the full catalogue rebuild below instead of publishing
+            # an empty layer list.
 
         # Colour map only, unlocked: reuse the current range from display-style.
         if triggered == "colormap-dropdown" and not locked:
@@ -1506,8 +1623,9 @@ def register_callbacks(app: dash.Dash):
                 continue
 
         if not layer_specs or not min_vals:
-            # View-mode change may leave no fitting layers; still update the host.
-            if triggered == "map-view-mode":
+            # View-mode change with no fitting collections: clear overlays only
+            # when we already had some (avoid stamping empty map-state on boot).
+            if triggered == "map-view-mode" and (map_state or {}).get("layers"):
                 return _publish([], no_update, leadtime_cog_urls=None)
             return no_update, no_update, no_update, no_update
 
@@ -1528,7 +1646,7 @@ def register_callbacks(app: dash.Dash):
             view_mode=mode,
         )
         if not layer_entries:
-            if triggered == "map-view-mode":
+            if triggered == "map-view-mode" and (map_state or {}).get("layers"):
                 return _publish([], no_update, leadtime_cog_urls=None)
             return no_update, no_update, no_update, no_update
 
@@ -1610,6 +1728,60 @@ def register_callbacks(app: dash.Dash):
         class_name = base if opened else f"{base} forecast-controls-column--collapsed"
         icon = "tabler:chevron-right" if opened else "tabler:chevron-left"
         return class_name, opened, icon
+
+    @app.callback(
+        Output("user-prefs", "data"),
+        Input("collections-dropdown", "value"),
+        Input("forecast-init-date-picker", "value"),
+        Input("variable-dropdown", "value"),
+        Input("colormap-dropdown", "value"),
+        Input("map-view-mode", "value"),
+        Input("display-style", "data"),
+        prevent_initial_call=True,
+    )
+    def save_user_prefs(
+        collection_ids,
+        forecast_start,
+        variable,
+        colormap,
+        view_mode,
+        display_style,
+    ):
+        """Persist live control choices to localStorage via ``user-prefs``."""
+        return merge_user_prefs(
+            collection=collection_ids,
+            forecast_start=forecast_start,
+            variable=variable,
+            colormap=colormap,
+            view_mode=view_mode,
+            display_style=display_style,
+        )
+
+    @app.callback(
+        Output("user-prefs", "data", allow_duplicate=True),
+        Output("collections-dropdown", "value", allow_duplicate=True),
+        Output("colormap-dropdown", "value", allow_duplicate=True),
+        Output("map-view-mode", "value", allow_duplicate=True),
+        Output("display-style", "data", allow_duplicate=True),
+        Output("map-state", "data", allow_duplicate=True),
+        Output("cog-results-layer", "children", allow_duplicate=True),
+        Input("user-prefs-reset", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def reset_user_prefs(_n_clicks):
+        """Clear saved prefs and restore factory controls in the live session."""
+        if not _n_clicks:
+            raise PreventUpdate
+        # Clearing collection cascades date/variable via existing STAC callbacks.
+        return (
+            None,
+            None,
+            DEFAULT_COLORMAP,
+            DEFAULT_VIEW_MODE,
+            dict(DEFAULT_DISPLAY_STYLE),
+            initial_map_state(),
+            [],
+        )
 
     @app.callback(
         Output("fixed-min", "value"),

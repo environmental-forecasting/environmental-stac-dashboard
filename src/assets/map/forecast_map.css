@@ -799,6 +799,10 @@
   background: rgba(255, 255, 255, 0.14);
 }
 
+.forecast-controls__reset {
+  margin-top: 16px;
+}
+
 /* Fixed-height timeline below the map - joins seam/sidebar/footer. */
 .forecast-timeline {
   flex: 0 0 96px;

@@ -14,6 +14,8 @@ layout = dmc.MantineProvider(
             dcc.Store(id="window-width"),
             dcc.Store(id="page-load-trigger", data=True),
             dcc.Store(id="controls-open", data=True),
+            # Per-browser map control defaults (collection, date, variable, …)
+            dcc.Store(id="user-prefs", storage_type="local", data=None),
             html.Div(header.header_layout, className="app-shell__header"),
             html.Div(
                 [
