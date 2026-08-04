@@ -983,6 +983,42 @@
     animateDefaultOrientation();
   }
 
+  /**
+   * Fit the default extent for the active TMS / projection (world or polar
+   * grid), with rotation cleared. Used when re-clicking the active view mode.
+   */
+  function resetView() {
+    if (northUpFollowRaf != null) {
+      global.cancelAnimationFrame(northUpFollowRaf);
+      northUpFollowRaf = null;
+    }
+    northUpLockEnabled = false;
+    northUpFollowPaused = false;
+    northUpClickEnabled = false;
+    syncNorthUpCursor();
+    syncRotateInteractions();
+    if (!ensureMap()) {
+      return;
+    }
+    clearPendingFit();
+    var view = map.getView();
+    if (!view) {
+      return;
+    }
+    var projectionCode =
+      (view.getProjection() && view.getProjection().getCode()) ||
+      currentProjection ||
+      "EPSG:3857";
+    var extent = currentViewExtent || worldExtentFor(projectionCode);
+    view.setRotation(0);
+    if (extent) {
+      fitViewExtent(view, extent);
+    } else {
+      view.setCenter(ol.proj.fromLonLat([0, 0], projectionCode));
+      view.setZoom(0);
+    }
+  }
+
   function resumeNorthUpFollow() {
     northUpFollowPaused = false;
     if (northUpLockEnabled) {
@@ -1313,6 +1349,7 @@
     setNorthUpClickEnabled: setNorthUpClickEnabled,
     setNorthUpLockEnabled: setNorthUpLockEnabled,
     resetOrientation: resetOrientation,
+    resetView: resetView,
     isOrientationRotated: isOrientationRotated,
     flyToPlace: flyToPlace,
     clearLastPlace: clearLastPlace,

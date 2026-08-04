@@ -24,6 +24,7 @@ header_layout = html.Div(
                 className="forecast-map-view-mode",
             ),
             className="forecast-header__view-mode",
+            title="Switch map projection. Click the active option again to reset the view.",
         ),
         dbc.DropdownMenu(
             nav=False,

@@ -610,8 +610,8 @@
       return;
     }
     if (mode === (lastState.mode || "")) {
-      // Same mode: still allow engine-only recovery.
-      applyEngine(engineForMode(mode));
+      // Same TMS / view mode: restore that mode's default framing.
+      resetView();
       return;
     }
     var engine = engineForMode(mode);
@@ -638,6 +638,92 @@
       next.view = view;
     }
     applyState(next);
+  }
+
+  var LEAFLET_WORLD_BOUNDS = [
+    [-85.051129, -180.0],
+    [85.051129, 180.0],
+  ];
+
+  /**
+   * Restore the default framing for the active engine / TMS.
+   *
+   * Used when the user re-clicks the already-selected view-mode pill.
+   */
+  function resetView() {
+    clearNorthUpSelection();
+    var engine = currentEngine();
+    if (engine === "leaflet_legacy") {
+      if (
+        global.dash_clientside &&
+        typeof global.dash_clientside.set_props === "function"
+      ) {
+        global.dash_clientside.set_props("map", {
+          invalidateSize: true,
+          viewport: {
+            bounds: LEAFLET_WORLD_BOUNDS,
+            transition: "fitBounds",
+            options: {
+              paddingTopLeft: [20, 20],
+              paddingBottomRight: [20, 20],
+              animate: false,
+            },
+          },
+        });
+      }
+      return;
+    }
+    if (
+      engine === "cesium" &&
+      global.ForecastMapCesium &&
+      typeof global.ForecastMapCesium.resetView === "function"
+    ) {
+      global.ForecastMapCesium.resetView();
+      return;
+    }
+    if (
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.resetView === "function"
+    ) {
+      global.ForecastMapOpenLayers.resetView();
+    }
+  }
+
+  function ensureViewModeResetClick() {
+    if (global.__forecastViewModeResetBound) {
+      return;
+    }
+    global.__forecastViewModeResetBound = true;
+    // RadioItems do not re-fire when the active pill is clicked again.
+    // Capture "already checked" on mousedown, then reset on click.
+    document.addEventListener(
+      "mousedown",
+      function (event) {
+        var label = event.target.closest
+          ? event.target.closest(".forecast-map-view-mode label")
+          : null;
+        if (!label) {
+          global.__forecastResetViewPending = false;
+          return;
+        }
+        var input = label.querySelector('input[type="radio"]');
+        global.__forecastResetViewPending = !!(input && input.checked);
+      },
+      true
+    );
+    document.addEventListener("click", function (event) {
+      if (
+        !event.target.closest ||
+        !event.target.closest(".forecast-map-view-mode")
+      ) {
+        return;
+      }
+      if (!global.__forecastResetViewPending) {
+        return;
+      }
+      global.__forecastResetViewPending = false;
+      resetView();
+    });
   }
 
   function publishPlaceStatus(result) {
@@ -1108,6 +1194,7 @@
   }
 
   ensureMapSearchKeys();
+  ensureViewModeResetClick();
 
   global.ForecastMap = {
     applyState: applyState,
@@ -1129,5 +1216,6 @@
     clearNorthUpPickMode: clearNorthUpPickMode,
     isOrientationRotated: isOrientationRotated,
     resetOrientation: resetOrientation,
+    resetView: resetView,
   };
 })(window);
