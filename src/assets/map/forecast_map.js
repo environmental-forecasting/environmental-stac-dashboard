@@ -24,6 +24,7 @@
 
   var lastRevision = null;
   var lastState = null;
+  var lastPlaceGoto = null;
   var activeEngine = "openlayers";
   var tilesReady = true;
   var readyTimeout = null;
@@ -522,8 +523,20 @@
     // asked to rebuild layers on every engine / TMS switch.
     if (engine === "openlayers" && global.ForecastMapOpenLayers) {
       global.ForecastMapOpenLayers.applyState(state);
+      if (lastPlaceGoto) {
+        global.requestAnimationFrame(function () {
+          var result = flyTo(lastPlaceGoto);
+          publishPlaceStatus(result);
+        });
+      }
     } else if (engine === "cesium" && global.ForecastMapCesium) {
       global.ForecastMapCesium.applyState(state);
+      if (lastPlaceGoto) {
+        global.requestAnimationFrame(function () {
+          var result = flyTo(lastPlaceGoto);
+          publishPlaceStatus(result);
+        });
+      }
     }
 
     // Still hide inactive hosts when applyState was skipped for them.
@@ -537,6 +550,30 @@
     if (engine === "leaflet_legacy") {
       setTilesReady(true);
       endDashMapWait();
+      if (lastPlaceGoto) {
+        global.requestAnimationFrame(function () {
+          // Silent: camera should already match when switching; place highlight only.
+          var result = flyToLeaflet(lastPlaceGoto, { animate: false });
+          publishPlaceStatus(result);
+          if (
+            result &&
+            result.leaflet &&
+            global.dash_clientside &&
+            typeof global.dash_clientside.set_props === "function"
+          ) {
+            var leaf = result.leaflet;
+            if (leaf.viewport) {
+              global.dash_clientside.set_props("map", {
+                invalidateSize: true,
+                viewport: leaf.viewport,
+              });
+            }
+            global.dash_clientside.set_props("map-search-highlight", {
+              data: leaf.data != null ? leaf.data : null,
+            });
+          }
+        });
+      }
     }
   }
 
@@ -602,6 +639,244 @@
     applyState(next);
   }
 
+  function publishPlaceStatus(result) {
+    if (!result || result.skipped) {
+      return;
+    }
+    if (
+      !global.dash_clientside ||
+      typeof global.dash_clientside.set_props !== "function"
+    ) {
+      return;
+    }
+    if (result.ok === false) {
+      global.dash_clientside.set_props("map-search-status", {
+        children: result.message || "Outside this map's coverage",
+        className: "forecast-map-search__status is-warning",
+      });
+      return;
+    }
+    global.dash_clientside.set_props("map-search-status", {
+      children: "",
+      className: "forecast-map-search__status",
+    });
+  }
+
+  function geojsonIsPointOnly(geojson) {
+    if (!geojson || !geojson.type) {
+      return true;
+    }
+    if (geojson.type === "Point" || geojson.type === "MultiPoint") {
+      return true;
+    }
+    if (geojson.type === "Feature") {
+      return geojsonIsPointOnly(geojson.geometry);
+    }
+    if (geojson.type === "FeatureCollection") {
+      var features = geojson.features || [];
+      return (
+        !features.length ||
+        features.every(function (feature) {
+          return geojsonIsPointOnly(feature);
+        })
+      );
+    }
+    return false;
+  }
+
+  function leafletHighlightData(goto) {
+    if (!goto || goto.lon == null || goto.lat == null) {
+      return null;
+    }
+    // Area geojson first; point-only geojson yields to bbox outline when present.
+    if (goto.geojson && goto.geojson.type && !geojsonIsPointOnly(goto.geojson)) {
+      if (
+        goto.geojson.type === "Feature" ||
+        goto.geojson.type === "FeatureCollection"
+      ) {
+        return goto.geojson;
+      }
+      return {
+        type: "Feature",
+        properties: {},
+        geometry: goto.geojson,
+      };
+    }
+    if (goto.bbox && goto.bbox.length >= 4) {
+      var w = Number(goto.bbox[0]);
+      var s = Number(goto.bbox[1]);
+      var e = Number(goto.bbox[2]);
+      var n = Number(goto.bbox[3]);
+      return {
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]],
+        },
+      };
+    }
+    if (goto.geojson && goto.geojson.type) {
+      if (
+        goto.geojson.type === "Feature" ||
+        goto.geojson.type === "FeatureCollection"
+      ) {
+        return goto.geojson;
+      }
+      return {
+        type: "Feature",
+        properties: {},
+        geometry: goto.geojson,
+      };
+    }
+    return {
+      type: "Feature",
+      properties: {},
+      geometry: {
+        type: "Point",
+        coordinates: [Number(goto.lon), Number(goto.lat)],
+      },
+    };
+  }
+
+  function flyToLeaflet(goto, opts) {
+    if (!goto || goto.lon == null || goto.lat == null) {
+      return { ok: true, skipped: true };
+    }
+    var lat = Number(goto.lat);
+    var lon = Number(goto.lon);
+    if (!isFinite(lat) || !isFinite(lon)) {
+      return { ok: false, message: "Invalid location" };
+    }
+    var zoom =
+      goto.zoom != null && isFinite(Number(goto.zoom)) ? Number(goto.zoom) : 14;
+    var animate = !(opts && opts.animate === false);
+    // dash-leaflet: center/zoom/bounds are initial-only. Post-init camera moves
+    // must go through the ``viewport`` prop.
+    var viewport;
+    if (goto.bbox && goto.bbox.length >= 4) {
+      var west = Number(goto.bbox[0]);
+      var south = Number(goto.bbox[1]);
+      var east = Number(goto.bbox[2]);
+      var north = Number(goto.bbox[3]);
+      // Rough WebMercator zoom from span. If fitting the outline would zoom
+      // out past the place zoom, keep the suggested zoom instead.
+      var span = Math.max(east - west, north - south, 1e-6);
+      var fittedZoom = Math.log2(360 / span);
+      if (
+        isFinite(zoom) &&
+        zoom <= 8 &&
+        isFinite(fittedZoom) &&
+        fittedZoom < zoom - 0.05
+      ) {
+        viewport = {
+          center: [lat, lon],
+          zoom: zoom,
+          transition: animate ? "flyTo" : "setView",
+          options: animate ? { duration: 0.45 } : { animate: false },
+        };
+      } else {
+        viewport = {
+          bounds: [
+            [south, west],
+            [north, east],
+          ],
+          transition: animate ? "flyToBounds" : "fitBounds",
+          options: animate
+            ? {
+                padding: [56, 56],
+                maxZoom: Math.max(zoom, 16),
+                duration: 0.45,
+              }
+            : {
+                padding: [56, 56],
+                maxZoom: Math.max(zoom, 16),
+                animate: false,
+              },
+        };
+      }
+    } else {
+      viewport = {
+        center: [lat, lon],
+        zoom: zoom,
+        transition: animate ? "flyTo" : "setView",
+        options: animate ? { duration: 0.45 } : { animate: false },
+      };
+    }
+    return {
+      ok: true,
+      leaflet: {
+        viewport: viewport,
+        data: leafletHighlightData(goto),
+      },
+    };
+  }
+
+  function currentEngine() {
+    if (lastState && lastState.engine) {
+      return lastState.engine;
+    }
+    if (activeEngine) {
+      return activeEngine;
+    }
+    var leafletHost = document.getElementById("forecast-map-leaflet");
+    if (
+      leafletHost &&
+      !leafletHost.classList.contains("forecast-map-host--hidden")
+    ) {
+      return "leaflet_legacy";
+    }
+    return "openlayers";
+  }
+
+  function flyTo(goto) {
+    if (goto && goto.lon != null && goto.lat != null) {
+      lastPlaceGoto = goto;
+    }
+    if (currentEngine() === "leaflet_legacy") {
+      return flyToLeaflet(goto);
+    }
+    if (currentEngine() === "cesium") {
+      if (
+        global.ForecastMapCesium &&
+        typeof global.ForecastMapCesium.flyToPlace === "function"
+      ) {
+        return global.ForecastMapCesium.flyToPlace(goto);
+      }
+      return { ok: false, message: "Globe map is not ready" };
+    }
+    if (
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.flyToPlace === "function"
+    ) {
+      return global.ForecastMapOpenLayers.flyToPlace(goto);
+    }
+    return { ok: true };
+  }
+
+  function clearPlace() {
+    lastPlaceGoto = null;
+    if (
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.clearLastPlace === "function"
+    ) {
+      global.ForecastMapOpenLayers.clearLastPlace();
+    }
+    if (
+      global.ForecastMapCesium &&
+      typeof global.ForecastMapCesium.clearLastPlace === "function"
+    ) {
+      global.ForecastMapCesium.clearLastPlace();
+    }
+    publishPlaceStatus({ ok: true });
+    if (
+      global.dash_clientside &&
+      typeof global.dash_clientside.set_props === "function"
+    ) {
+      global.dash_clientside.set_props("map-search-highlight", { data: null });
+    }
+  }
+
   global.ForecastMap = {
     applyState: applyState,
     applyEngine: applyEngine,
@@ -614,5 +889,7 @@
     isTilesReady: isTilesReady,
     setBusy: setBusy,
     clearBusy: clearBusy,
+    flyTo: flyTo,
+    clearPlace: clearPlace,
   };
 })(window);

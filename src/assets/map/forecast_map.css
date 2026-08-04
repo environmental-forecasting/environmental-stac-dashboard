@@ -559,7 +559,11 @@
 
 .forecast-map-search__status {
   display: none;
-  padding: 0.25rem 0.85rem 0.6rem;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0.15rem 0.85rem 0.55rem;
+  border: 0;
+  background: transparent;
   color: rgba(230, 236, 248, 0.9);
   font-size: 0.72rem;
   font-weight: 500;
@@ -572,9 +576,18 @@
   display: block;
 }
 
-.forecast-map-search.has-results .forecast-map-search__status:not(:empty) {
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+.forecast-map-search.has-results .forecast-map-search__status:not(:empty):not(.is-warning) {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding-top: 0.45rem;
+}
+
+.forecast-map-search__status.is-warning:not(:empty) {
+  margin: 0.35rem;
+  color: #fff8e8;
+  border: 1px solid rgba(232, 176, 74, 0.7);
+  border-radius: 0.7rem;
+  background: rgba(130, 78, 16, 0.9);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
 }
 
 /* Keep zoom clear of the search box. */

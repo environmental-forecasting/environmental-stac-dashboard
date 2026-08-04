@@ -11,6 +11,7 @@ DEFAULT_ZOOM = 2
 
 # Leaflet host (hidden unless the Leaflet view mode is selected).
 # Colourbar lives in the timeline (shared HTML ramp), not on the map face.
+# Search highlight: polygons use ``style``; points use Leaflet's default marker.
 _leaflet_map = dl.Map(
     [
         dl.TileLayer(
@@ -19,6 +20,18 @@ _leaflet_map = dl.Map(
             zIndex=0,
         ),
         dl.LayersControl([], id="cog-results-layer"),
+        dl.GeoJSON(
+            id="map-search-highlight",
+            data=None,
+            zoomToBounds=False,
+            style={
+                "color": "#5b8def",
+                "weight": 2.5,
+                "opacity": 0.95,
+                "fillColor": "#5b8def",
+                "fillOpacity": 0.16,
+            },
+        ),
         dl.ScaleControl(position="bottomright"),
         dl.FullScreenControl(position="bottomleft"),
     ],
@@ -164,5 +177,6 @@ leaflet_map = html.Div(
         dcc.Store(id="map-state", data=initial_map_state()),
         dcc.Store(id="map-view-presets", data={}),
         dcc.Store(id="map-bridge-tick", data=0),
+        dcc.Store(id="map-goto", data=None),
     ],
 )

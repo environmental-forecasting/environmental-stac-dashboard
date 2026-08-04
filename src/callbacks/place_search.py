@@ -3,7 +3,7 @@
 import time
 
 import dash
-from dash import ALL, Input, Output, State, callback_context, html
+from dash import ALL, Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 from map.geocode import parse_lon_lat, place_search
 
@@ -86,8 +86,9 @@ def _map_search_suggest(debounced, committed, view_mode):
         (committed or {}).get("q") if isinstance(committed, dict) else None
     ) or ""
     # Ignore the fill that follows a pick so the list does not reopen.
+    # Leave status alone: the flyTo clientside owns the coverage warning.
     if q and q == committed_q.strip():
-        return _closed_panel("")
+        return [_search_hit_sentinel()], [], no_update, "forecast-map-search"
     if len(q) < 2:
         return _closed_panel("")
 
@@ -114,13 +115,19 @@ def _map_search_suggest(debounced, committed, view_mode):
     )
 
 
-def _map_search_pick(label: str):
-    """Close the panel and show the chosen place label in the input."""
-    text = (label or "").strip()
+def _map_search_commit(lon, lat, zoom, label, *, bbox=None, geojson=None):
+    """Build a map-goto payload and close the suggestion panel."""
+    text = (label or f"{lat:.4f}, {lon:.4f}").strip()
+    goto = {"lon": lon, "lat": lat, "zoom": zoom, "ts": time.time()}
+    if bbox:
+        goto["bbox"] = bbox
+    if geojson:
+        goto["geojson"] = geojson
     return (
+        goto,
         [_search_hit_sentinel()],
         [],
-        "",
+        no_update,
         "forecast-map-search",
         text,
         {"q": text, "ts": time.time()},
@@ -128,7 +135,7 @@ def _map_search_pick(label: str):
 
 
 def _map_search_choose(hit_clicks, n_submit, hits, query, view_mode):
-    """Handle a suggestion click or Enter in the query box."""
+    """Handle a suggestion click or Enter: emit map-goto for the clientside fly."""
     triggered = callback_context.triggered_id
 
     if triggered == "map-search-query":
@@ -138,13 +145,29 @@ def _map_search_choose(hit_clicks, n_submit, hits, query, view_mode):
         parsed = parse_lon_lat(q)
         if parsed is not None:
             lon, lat = parsed
-            return _map_search_pick(_coord_hit(lon, lat)["label"])
+            return _map_search_commit(lon, lat, _COORD_ZOOM, _coord_hit(lon, lat)["label"])
         if hits:
-            return _map_search_pick(hits[0].get("label"))
+            chosen = hits[0]
+            return _map_search_commit(
+                chosen["lon"],
+                chosen["lat"],
+                chosen.get("zoom", _COORD_ZOOM),
+                chosen.get("label"),
+                bbox=chosen.get("bbox"),
+                geojson=chosen.get("geojson"),
+            )
         looked = place_search().search(q, mode=view_mode, limit=1)
         if not looked:
             raise PreventUpdate
-        return _map_search_pick(looked[0].get("label"))
+        hit = looked[0]
+        return _map_search_commit(
+            hit["lon"],
+            hit["lat"],
+            hit.get("zoom", _COORD_ZOOM),
+            hit.get("label"),
+            bbox=hit.get("bbox"),
+            geojson=hit.get("geojson"),
+        )
 
     if not isinstance(triggered, dict) or triggered.get("type") != "map-search-hit":
         raise PreventUpdate
@@ -158,11 +181,19 @@ def _map_search_choose(hit_clicks, n_submit, hits, query, view_mode):
         or index >= len(hits)
     ):
         raise PreventUpdate
-    return _map_search_pick(hits[index].get("label"))
+    hit = hits[index]
+    return _map_search_commit(
+        hit["lon"],
+        hit["lat"],
+        hit.get("zoom", _COORD_ZOOM),
+        hit.get("label"),
+        bbox=hit.get("bbox"),
+        geojson=hit.get("geojson"),
+    )
 
 
 def _map_search_clear(n_clicks):
-    """Reset the search box to an empty state."""
+    """Reset the search box and clear any place highlight."""
     if not n_clicks:
         raise PreventUpdate
     return (
@@ -173,6 +204,7 @@ def _map_search_clear(n_clicks):
         "",
         "forecast-map-search__status",
         "forecast-map-search",
+        None,
         None,
     )
 
@@ -189,6 +221,7 @@ def register_callbacks(app: dash.Dash):
             }
             var q = query || "";
             var picked = committed && committed.q != null ? String(committed.q) : "";
+            // Ignore the fill after a pick so an outside-coverage warning stays.
             if (picked && q === picked) {
                 return window.dash_clientside.no_update;
             }
@@ -228,6 +261,7 @@ def register_callbacks(app: dash.Dash):
     )(_map_search_suggest)
 
     app.callback(
+        Output("map-goto", "data"),
         Output("map-search-suggestions", "children", allow_duplicate=True),
         Output("map-search-hits", "data", allow_duplicate=True),
         Output("map-search-status", "children", allow_duplicate=True),
@@ -251,6 +285,7 @@ def register_callbacks(app: dash.Dash):
         Output("map-search-status", "className", allow_duplicate=True),
         Output("map-search", "className", allow_duplicate=True),
         Output("map-search-debounced", "data", allow_duplicate=True),
+        Output("map-search-highlight", "data", allow_duplicate=True),
         Input("map-search-clear", "n_clicks"),
         prevent_initial_call=True,
     )(_map_search_clear)
@@ -260,6 +295,9 @@ def register_callbacks(app: dash.Dash):
         function(n) {
             if (!n) {
                 return window.dash_clientside.no_update;
+            }
+            if (window.ForecastMap && typeof window.ForecastMap.clearPlace === "function") {
+                window.ForecastMap.clearPlace();
             }
             window.setTimeout(function () {
                 var input = document.getElementById("map-search-query");
@@ -310,4 +348,48 @@ def register_callbacks(app: dash.Dash):
         """,
         Output("map-search-field", "className"),
         Input("map-search-query", "value"),
+    )
+
+    # Fly the active map host and draw the outline highlight.
+    app.clientside_callback(
+        """
+        function(goto) {
+            var nu = window.dash_clientside.no_update;
+            // tick, status text, status class, leaflet viewport, highlight geojson
+            if (!goto || goto.lon == null || goto.lat == null) {
+                return [nu, nu, nu, nu, nu];
+            }
+            var result = {ok: true};
+            if (window.ForecastMap && typeof window.ForecastMap.flyTo === "function") {
+                result = window.ForecastMap.flyTo(goto) || {ok: true};
+            }
+            if (result && result.ok === false) {
+                return [
+                    nu,
+                    result.message || "Outside this map's coverage",
+                    "forecast-map-search__status is-warning",
+                    nu,
+                    nu,
+                ];
+            }
+            var leaf = result && result.leaflet;
+            if (leaf) {
+                return [
+                    nu,
+                    "",
+                    "forecast-map-search__status",
+                    leaf.viewport != null ? leaf.viewport : nu,
+                    leaf.data != null ? leaf.data : null,
+                ];
+            }
+            return [nu, "", "forecast-map-search__status", nu, nu];
+        }
+        """,
+        Output("map-bridge-tick", "data", allow_duplicate=True),
+        Output("map-search-status", "children", allow_duplicate=True),
+        Output("map-search-status", "className", allow_duplicate=True),
+        Output("map", "viewport"),
+        Output("map-search-highlight", "data"),
+        Input("map-goto", "data"),
+        prevent_initial_call=True,
     )

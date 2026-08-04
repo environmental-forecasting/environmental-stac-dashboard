@@ -14,12 +14,18 @@
   var basemapUrl = null;
   var currentProjection = null;
   var currentTileGrid = null;
+  var currentViewExtent = null;
   var registeredProj4 = {};
+  // Last search selection; rechecked when the TMS / projection changes.
+  var lastPlaceGoto = null;
   // Extent to fit again once the map has a real size on screen.
   var pendingFitExtent = null;
   // Overlays added while size was 0 need a source refresh once layout runs.
   var overlaysAwaitingSize = false;
   var applyGeneration = 0;
+  // Search result highlight (polygon / bbox / point).
+  var placeHighlightLayer = null;
+  var placeHighlightSource = null;
 
   function getHost() {
     return document.getElementById(HOST_ID);
@@ -451,6 +457,7 @@
     }
 
     currentProjection = projectionCode;
+    currentViewExtent = view.extent || worldExtentFor(projectionCode);
     clearPendingFit();
 
     var nextView;
@@ -748,10 +755,269 @@
     }
   }
 
+  function isPolarProjection(code) {
+    return !!(code && code !== "EPSG:3857");
+  }
+
+  function clearPlaceHighlight() {
+    if (placeHighlightSource) {
+      placeHighlightSource.clear();
+    }
+  }
+
+  function ensurePlaceHighlightLayer() {
+    if (!map) {
+      return null;
+    }
+    if (placeHighlightLayer) {
+      return placeHighlightSource;
+    }
+    placeHighlightSource = new ol.source.Vector();
+    placeHighlightLayer = new ol.layer.Vector({
+      source: placeHighlightSource,
+      zIndex: 250,
+      style: new ol.style.Style({
+        stroke: new ol.style.Stroke({
+          color: "rgba(91, 141, 239, 0.95)",
+          width: 2.5,
+        }),
+        fill: new ol.style.Fill({
+          color: "rgba(91, 141, 239, 0.16)",
+        }),
+        image: new ol.style.Circle({
+          radius: 7,
+          fill: new ol.style.Fill({ color: "rgba(91, 141, 239, 0.9)" }),
+          stroke: new ol.style.Stroke({ color: "#fff", width: 2 }),
+        }),
+      }),
+    });
+    map.addLayer(placeHighlightLayer);
+    return placeHighlightSource;
+  }
+
+  function geojsonIsPointOnly(geojson) {
+    if (!geojson || !geojson.type) {
+      return false;
+    }
+    if (geojson.type === "Point" || geojson.type === "MultiPoint") {
+      return true;
+    }
+    if (geojson.type === "Feature") {
+      return geojsonIsPointOnly(geojson.geometry);
+    }
+    if (geojson.type === "FeatureCollection") {
+      var features = geojson.features || [];
+      return (
+        features.length > 0 &&
+        features.every(function (feature) {
+          return geojsonIsPointOnly(feature);
+        })
+      );
+    }
+    return false;
+  }
+
+  function showPlaceHighlight(opts, projectionCode) {
+    var source = ensurePlaceHighlightLayer();
+    if (!source) {
+      return;
+    }
+    source.clear();
+    var geojson = opts && opts.geojson;
+    var bbox = opts && opts.bbox;
+    var lon = opts && opts.lon;
+    var lat = opts && opts.lat;
+    try {
+      // Prefer area geometry. Point geojson (common for Nominatim natural
+      // features) is skipped when a bbox outline is available.
+      var useGeojson =
+        geojson &&
+        !geojsonIsPointOnly(geojson) &&
+        typeof ol.format !== "undefined" &&
+        ol.format.GeoJSON;
+      if (useGeojson) {
+        var features = new ol.format.GeoJSON().readFeatures(geojson, {
+          dataProjection: "EPSG:4326",
+          featureProjection: projectionCode,
+        });
+        if (features && features.length) {
+          source.addFeatures(features);
+          return;
+        }
+      }
+      if (bbox && bbox.length >= 4) {
+        var ring = [
+          [bbox[0], bbox[1]],
+          [bbox[2], bbox[1]],
+          [bbox[2], bbox[3]],
+          [bbox[0], bbox[3]],
+          [bbox[0], bbox[1]],
+        ];
+        var polygon = new ol.geom.Polygon([ring]).transform(
+          "EPSG:4326",
+          projectionCode
+        );
+        source.addFeature(new ol.Feature({ geometry: polygon }));
+        return;
+      }
+      if (geojson && typeof ol.format !== "undefined" && ol.format.GeoJSON) {
+        var pointFeatures = new ol.format.GeoJSON().readFeatures(geojson, {
+          dataProjection: "EPSG:4326",
+          featureProjection: projectionCode,
+        });
+        if (pointFeatures && pointFeatures.length) {
+          source.addFeatures(pointFeatures);
+          return;
+        }
+      }
+      if (lon != null && lat != null) {
+        source.addFeature(
+          new ol.Feature({
+            geometry: new ol.geom.Point(
+              ol.proj.fromLonLat([Number(lon), Number(lat)], projectionCode)
+            ),
+          })
+        );
+      }
+    } catch (err) {
+      console.warn("ForecastMap: place highlight failed", err);
+    }
+  }
+
+  function placeFitsCurrentView(lon, lat) {
+    // Global views accept any lon/lat.
+    if (!isPolarProjection(currentProjection)) {
+      return true;
+    }
+    var latN = Number(lat);
+    var lonN = Number(lon);
+    if (!isFinite(latN) || !isFinite(lonN)) {
+      return false;
+    }
+    // Match dashboard hemisphere rules for known polar TMS ids.
+    var code = String(currentProjection || "");
+    var epsg = (code.match(/(\d+)$/) || [])[1];
+    if (epsg === "6931" && !(latN > 0)) {
+      return false;
+    }
+    if (epsg === "6932" && !(latN < 0)) {
+      return false;
+    }
+    var coord = ol.proj.fromLonLat([lonN, latN], currentProjection);
+    if (!coord || !isFinite(coord[0]) || !isFinite(coord[1])) {
+      return false;
+    }
+    var extent = currentViewExtent || worldExtentFor(currentProjection);
+    if (!extent || extent.length < 4) {
+      return true;
+    }
+    var padX = (extent[2] - extent[0]) * 0.02;
+    var padY = (extent[3] - extent[1]) * 0.02;
+    return ol.extent.containsXY(
+      [extent[0] + padX, extent[1] + padY, extent[2] - padX, extent[3] - padY],
+      coord[0],
+      coord[1]
+    );
+  }
+
+  /**
+   * Animate center/zoom for place search and draw an outline highlight.
+   */
+  function flyToPlace(opts) {
+    if (opts && opts.lon != null && opts.lat != null) {
+      lastPlaceGoto = opts;
+    }
+    if (!opts || !ensureMap()) {
+      return { ok: false, message: "Map is not ready" };
+    }
+    var view = map.getView();
+    if (!view) {
+      return { ok: false, message: "Map is not ready" };
+    }
+    var projectionCode = currentProjection || "EPSG:3857";
+    var lon = Number(opts.lon);
+    var lat = Number(opts.lat);
+    var zoom = opts.zoom != null ? Number(opts.zoom) : 14;
+    var bbox = opts.bbox;
+
+    if (!placeFitsCurrentView(lon, lat)) {
+      // Stay on the current TMS; do not zoom into empty / clamped space.
+      clearPlaceHighlight();
+      return { ok: false, message: "Outside this map's coverage" };
+    }
+
+    clearPendingFit();
+    showPlaceHighlight(opts, projectionCode);
+
+    var center = ol.proj.fromLonLat([lon, lat], projectionCode);
+    if (!center) {
+      return { ok: false, message: "Outside this map's coverage" };
+    }
+
+    if (bbox && bbox.length >= 4) {
+      var extent = ol.proj.transformExtent(
+        [bbox[0], bbox[1], bbox[2], bbox[3]],
+        "EPSG:4326",
+        projectionCode
+      );
+      if (extent && extent.every(isFinite)) {
+        var size = map.getSize() || [0, 0];
+        var pad = 56;
+        var fitSize = [
+          Math.max(size[0] - pad * 2, 1),
+          Math.max(size[1] - pad * 2, 1),
+        ];
+        var resolution = view.getResolutionForExtent(extent, fitSize);
+        var fittedZoom =
+          resolution != null && isFinite(resolution)
+            ? view.getZoomForResolution(resolution)
+            : null;
+        // Large outlines (Hudson Bay, seas) can fit far below the place zoom.
+        // Keep the suggested/previous zoom at the centroid; still draw the outline.
+        // Only for wide-area zooms (<=8); higher values are fit maxZoom caps.
+        if (
+          isFinite(zoom) &&
+          zoom <= 8 &&
+          fittedZoom != null &&
+          isFinite(fittedZoom) &&
+          fittedZoom < zoom - 0.05
+        ) {
+          view.animate({
+            center: center,
+            zoom: zoom,
+            duration: 450,
+          });
+          return { ok: true };
+        }
+        view.fit(extent, {
+          size: size,
+          padding: [pad, pad, pad, pad],
+          maxZoom: Math.max(zoom, 16),
+          duration: 450,
+        });
+        return { ok: true };
+      }
+    }
+
+    view.animate({
+      center: center,
+      zoom: isFinite(zoom) ? zoom : 14,
+      duration: 450,
+    });
+    return { ok: true };
+  }
+
+  function clearLastPlace() {
+    lastPlaceGoto = null;
+    clearPlaceHighlight();
+  }
+
   global.ForecastMapOpenLayers = {
     applyState: applyState,
     applyLeadtime: applyLeadtime,
     prefetchLayers: prefetchLayers,
     hasPendingSwap: hasPendingSwap,
+    flyToPlace: flyToPlace,
+    clearLastPlace: clearLastPlace,
   };
 })(window);
