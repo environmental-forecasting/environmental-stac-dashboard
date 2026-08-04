@@ -1,4 +1,18 @@
 from .asset_urls import to_tiler_asset_url
+from .basemap import (
+    BASEMAP_ATTRIBUTION,
+    BASEMAP_DARK_MATTER,
+    BASEMAP_OSM,
+    BASEMAP_POSITRON,
+    BASEMAP_VOYAGER,
+    DEFAULT_BASEMAP_ATTRIBUTION,
+    DEFAULT_BASEMAP_ID,
+    DEFAULT_BASEMAP_XYZ_URL,
+    OSM_XYZ_URL,
+    basemap_descriptor,
+    list_basemap_options,
+    normalise_basemap_id,
+)
 from .leadtime_cog_urls import (
     build_leadtime_cog_urls,
     layers_from_leadtime_cog_urls,
@@ -26,8 +40,8 @@ from .projections import (
     view_hint_for_mode,
     view_mode_and_hint,
 )
-from .state import build_map_state, initial_map_state
 from .request import build_map_request, collections_list, recipe_complete
+from .state import build_map_state, default_basemap, initial_map_state
 from .tile_urls import (
     build_cog_tile_url,
     rewrite_layer_entries_style,
@@ -42,9 +56,15 @@ from .tms_client import (
 )
 
 __all__ = [
+    "BASEMAP_ATTRIBUTION",
+    "BASEMAP_DARK_MATTER",
+    "BASEMAP_OSM",
+    "BASEMAP_POSITRON",
+    "BASEMAP_VOYAGER",
     "WEB_MERCATOR_QUAD",
     "MapEngine",
     "MapViewMode",
+    "basemap_descriptor",
     "bbox_fits_view_mode",
     "build_cog_tile_url",
     "build_leadtime_cog_urls",
@@ -53,6 +73,10 @@ __all__ = [
     "clear_tile_grid_cache",
     "collection_fits_view_mode",
     "collections_list",
+    "default_basemap",
+    "DEFAULT_BASEMAP_ATTRIBUTION",
+    "DEFAULT_BASEMAP_ID",
+    "DEFAULT_BASEMAP_XYZ_URL",
     "epsg_code_for_mode",
     "get_tile_grid",
     "initial_map_state",
@@ -60,10 +84,13 @@ __all__ = [
     "label_for_view_mode",
     "layers_from_leadtime_cog_urls",
     "leadtime_cog_urls_match_style",
+    "list_basemap_options",
     "list_custom_epsg_tms_ids",
     "list_view_mode_options",
     "list_view_mode_presets",
+    "normalise_basemap_id",
     "normalise_view_mode",
+    "OSM_XYZ_URL",
     "proj4_for_epsg",
     "recipe_complete",
     "resolve_mode_and_engine",

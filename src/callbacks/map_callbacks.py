@@ -41,8 +41,10 @@ from user_prefs import (
 
 from map import (
     WEB_MERCATOR_QUAD,
+    DEFAULT_BASEMAP_ID,
     MapEngine,
     MapViewMode,
+    basemap_descriptor,
     bbox_fits_view_mode,
     build_cog_tile_url,
     build_leadtime_cog_urls,
@@ -52,6 +54,7 @@ from map import (
     initial_map_state,
     layers_from_leadtime_cog_urls,
     leadtime_cog_urls_match_style,
+    list_basemap_options,
     list_view_mode_options,
     list_view_mode_presets,
     resolve_mode_and_engine,
@@ -936,6 +939,74 @@ def register_callbacks(app: dash.Dash):
             user_prefs, "view_mode", {opt["value"] for opt in options}
         )
         return options, presets, preferred if preferred is not None else no_update
+
+    @app.callback(
+        Output("basemap-style", "value"),
+        Input("page-load-trigger", "data"),
+        State("user-prefs", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def apply_basemap_prefs(_, user_prefs):
+        """Seed the basemap control from browser prefs on load."""
+        preferred = preferred_in(
+            user_prefs,
+            "basemap",
+            {opt["value"] for opt in list_basemap_options()},
+        )
+        if preferred is None:
+            raise PreventUpdate
+        return preferred
+
+    @app.callback(
+        Output("map-state", "data", allow_duplicate=True),
+        Output("map-base-layer", "url"),
+        Output("map-base-layer", "attribution"),
+        Input("basemap-style", "value"),
+        State("map-state", "data"),
+        State("map-view-mode", "value"),
+        prevent_initial_call=True,
+    )
+    def apply_basemap_choice(basemap_id, map_state, map_view_mode):
+        """
+        Swap the XYZ basemap without rebuilding forecast tiles.
+
+        Engine / projection come from the live view-mode control, not only
+        ``map-state``. Optimistic Globe/TMS switches update that control (and
+        the client) before Python finishes painting; republishing a stale
+        Global OpenLayers ``map-state`` here used to flatten the map.
+        """
+        descriptor = basemap_descriptor(basemap_id)
+        previous = map_state if isinstance(map_state, dict) else initial_map_state()
+        if (previous.get("basemap") or {}).get("url") == descriptor["url"]:
+            raise PreventUpdate
+
+        ui_mode = (
+            map_view_mode
+            or previous.get("mode")
+            or MapViewMode.GLOBAL_3857.value
+        )
+        mode, view_hint = view_mode_and_hint(ui_mode, TILER_INTERNAL_URL)
+        engine = resolve_engine_for_mode(mode)
+        # Keep the current framing when we are already on this mode/engine.
+        if (
+            previous.get("mode") == mode
+            and previous.get("engine") == engine
+            and isinstance(previous.get("view"), dict)
+        ):
+            view = previous["view"]
+        else:
+            view = view_hint
+
+        next_state = build_map_state(
+            previous=previous,
+            engine=engine,
+            mode=mode,
+            layers=previous.get("layers") or [],
+            view=view,
+            basemap=descriptor,
+            prefetch_layers=previous.get("prefetchLayers") or [],
+        )
+        return next_state, descriptor["url"], descriptor["attribution"]
 
     @app.callback(
         [
@@ -1891,6 +1962,7 @@ def register_callbacks(app: dash.Dash):
         Input("variable-dropdown", "value"),
         Input("colormap-dropdown", "value"),
         Input("map-view-mode", "value"),
+        Input("basemap-style", "value"),
         Input("display-style", "data"),
         prevent_initial_call=True,
     )
@@ -1900,6 +1972,7 @@ def register_callbacks(app: dash.Dash):
         variable,
         colormap,
         view_mode,
+        basemap_id,
         display_style,
     ):
         """Persist live control choices to localStorage via ``user-prefs``."""
@@ -1909,6 +1982,7 @@ def register_callbacks(app: dash.Dash):
             variable=variable,
             colormap=colormap,
             view_mode=view_mode,
+            basemap=basemap_id,
             display_style=display_style,
         )
 
@@ -1919,6 +1993,7 @@ def register_callbacks(app: dash.Dash):
         Input("variable-dropdown", "value"),
         Input("colormap-dropdown", "value"),
         Input("map-view-mode", "value"),
+        Input("basemap-style", "value"),
         Input("display-style", "data"),
         Input("user-prefs", "data"),
         prevent_initial_call=False,
@@ -1929,6 +2004,7 @@ def register_callbacks(app: dash.Dash):
         variable,
         colormap,
         view_mode,
+        basemap_id,
         display_style,
         user_prefs,
     ):
@@ -1939,6 +2015,7 @@ def register_callbacks(app: dash.Dash):
             variable=variable,
             colormap=colormap,
             view_mode=view_mode,
+            basemap=basemap_id,
             display_style=display_style,
         )
         # Prefer listening to user-prefs as Input (not State): after Reset clears
@@ -1951,9 +2028,12 @@ def register_callbacks(app: dash.Dash):
         Output("collections-dropdown", "value", allow_duplicate=True),
         Output("colormap-dropdown", "value", allow_duplicate=True),
         Output("map-view-mode", "value", allow_duplicate=True),
+        Output("basemap-style", "value", allow_duplicate=True),
         Output("display-style", "data", allow_duplicate=True),
         Output("map-request", "data", allow_duplicate=True),
         Output("map-state", "data", allow_duplicate=True),
+        Output("map-base-layer", "url", allow_duplicate=True),
+        Output("map-base-layer", "attribution", allow_duplicate=True),
         Output("cog-results-layer", "children", allow_duplicate=True),
         Input("user-prefs-reset", "n_clicks"),
         prevent_initial_call=True,
@@ -1962,15 +2042,19 @@ def register_callbacks(app: dash.Dash):
         """Clear saved prefs and restore factory controls in the live session."""
         if not _n_clicks:
             raise PreventUpdate
+        factory_basemap = basemap_descriptor(DEFAULT_BASEMAP_ID)
         # Clearing collection cascades date/variable via existing STAC callbacks.
         return (
             None,
             None,
             DEFAULT_COLORMAP,
             DEFAULT_VIEW_MODE,
+            DEFAULT_BASEMAP_ID,
             dict(DEFAULT_DISPLAY_STYLE),
             None,
             initial_map_state(),
+            factory_basemap["url"],
+            factory_basemap["attribution"],
             [],
         )
 

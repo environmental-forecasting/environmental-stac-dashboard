@@ -4,7 +4,10 @@
   "use strict";
 
   var HOST_ID = "forecast-map-globe";
-  var OSM_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+  // Free Carto Voyager (OSM-derived); kept in polar views via OL/Cesium.
+  var DEFAULT_BASEMAP_URL =
+    "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
+  var DEFAULT_BASEMAP_CREDIT = "© OpenStreetMap contributors © CARTO";
   var forecastLayersById = {};
   var forecastUrlsById = {};
   // URL swaps stack a hidden/incoming layer above the stable one until ready.
@@ -27,11 +30,11 @@
     return document.getElementById(HOST_ID);
   }
 
-  function osmImageryLayer(url) {
+  function basemapImageryLayer(url, credit) {
     return new Cesium.ImageryLayer(
       new Cesium.UrlTemplateImageryProvider({
-        url: url || OSM_URL,
-        credit: new Cesium.Credit("© OpenStreetMap contributors"),
+        url: url || DEFAULT_BASEMAP_URL,
+        credit: new Cesium.Credit(credit || DEFAULT_BASEMAP_CREDIT),
       })
     );
   }
@@ -454,16 +457,16 @@
       infoBox: false,
       selectionIndicator: false,
       // Default ellipsoid only
-      baseLayer: osmImageryLayer(OSM_URL),
+      baseLayer: basemapImageryLayer(DEFAULT_BASEMAP_URL),
       // No star field / sun / moon
       skyBox: false,
     });
 
     basemapLayer = viewer.imageryLayers.get(0);
-    basemapUrl = OSM_URL;
+    basemapUrl = DEFAULT_BASEMAP_URL;
     viewer.scene.globe.enableLighting = false;
     viewer.scene.fog.enabled = false;
-    // Ground atmosphere washes OSM/forecast tiles out when zoomed out.
+    // Ground atmosphere washes basemap/forecast tiles out when zoomed out.
     viewer.scene.globe.showGroundAtmosphere = false;
     if (viewer.scene.skyAtmosphere) {
       viewer.scene.skyAtmosphere.show = true;
@@ -487,13 +490,16 @@
     if (!basemap || !basemap.url || showBasemap === false) {
       return;
     }
-    // Avoid tearing down OSM on every map-state revision.
+    // Avoid tearing down the basemap on every map-state revision.
     if (basemap.url === basemapUrl) {
       return;
     }
     var index = viewer.imageryLayers.indexOf(basemapLayer);
     viewer.imageryLayers.remove(basemapLayer, false);
-    basemapLayer = osmImageryLayer(basemap.url);
+    basemapLayer = basemapImageryLayer(
+      basemap.url,
+      basemap.attribution || DEFAULT_BASEMAP_CREDIT
+    );
     basemapUrl = basemap.url;
     if (index >= 0) {
       viewer.imageryLayers.add(basemapLayer, index);
@@ -1011,6 +1017,7 @@
     applyLeadtime: applyLeadtime,
     prefetchLayers: prefetchLayers,
     hasPendingSwap: hasPendingSwap,
+    setBasemap: setBasemap,
     resetView: showFullGlobe,
     flyToPlace: flyToPlace,
     clearLastPlace: clearLastPlace,

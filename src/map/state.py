@@ -2,13 +2,21 @@
 
 from typing import Any
 
+from .basemap import (
+    DEFAULT_BASEMAP_ATTRIBUTION,
+    DEFAULT_BASEMAP_XYZ_URL,
+    OSM_XYZ_URL,
+    basemap_descriptor,
+)
 from .projections import MapEngine, MapViewMode, view_hint_for_mode
-
-# Standard OSM raster tiles for global Web Mercator basemaps.
-OSM_XYZ_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 
 # Omit a field to keep the previous value; pass None to clear it.
 _UNSET: Any = object()
+
+
+def default_basemap() -> dict[str, str]:
+    """Return the default XYZ basemap descriptor for ``map-state``."""
+    return basemap_descriptor()
 
 
 def initial_map_state() -> dict[str, Any]:
@@ -21,7 +29,7 @@ def initial_map_state() -> dict[str, Any]:
     return {
         "engine": MapEngine.OPENLAYERS.value,
         "mode": MapViewMode.GLOBAL_3857.value,
-        "basemap": {"type": "xyz", "url": OSM_XYZ_URL},
+        "basemap": default_basemap(),
         "layers": [],
         "prefetchLayers": [],
         "leadtimeCogUrls": None,
@@ -52,7 +60,7 @@ def build_map_state(
         mode: Active view mode id.
         layers: Forecast overlay descriptors (``id``, ``title``, ``tileUrl``, ...).
         view: Optional fit / centre hint for the client.
-        basemap: Optional basemap descriptor; defaults to OSM XYZ.
+        basemap: Optional basemap descriptor; defaults to Carto Voyager XYZ.
         prefetch_layers: Optional overlays for the next leadtime step.
         leadtime_cog_urls: Cached COG URLs per leadtime for fast client-side
             swaps. Omit to keep the previous value; pass ``None`` to clear.
@@ -63,7 +71,8 @@ def build_map_state(
         meaningful changed so clients can no-op.
     """
     previous = previous or initial_map_state()
-    basemap = basemap or {"type": "xyz", "url": OSM_XYZ_URL}
+    if basemap is None:
+        basemap = previous.get("basemap") or default_basemap()
     if view is None:
         view = previous.get("view")
     if leadtime_cog_urls is _UNSET:
@@ -101,3 +110,15 @@ def _state_content_equal(left: dict[str, Any], right: dict[str, Any]) -> bool:
         "view",
     )
     return all(left.get(key) == right.get(key) for key in keys)
+
+
+# Re-export basemap URL constants for existing imports.
+__all__ = [
+    "DEFAULT_BASEMAP_ATTRIBUTION",
+    "DEFAULT_BASEMAP_XYZ_URL",
+    "OSM_XYZ_URL",
+    "basemap_descriptor",
+    "build_map_state",
+    "default_basemap",
+    "initial_map_state",
+]

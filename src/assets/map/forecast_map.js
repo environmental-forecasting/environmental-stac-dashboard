@@ -571,6 +571,29 @@
     return false;
   }
 
+  function applyBasemapFromState(state) {
+    if (!state) {
+      return;
+    }
+    var engine = state.engine || "openlayers";
+    var show = state.view && state.view.showBasemap;
+    if (
+      engine === "openlayers" &&
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.setBasemap === "function"
+    ) {
+      global.ForecastMapOpenLayers.setBasemap(state.basemap, show);
+      return;
+    }
+    if (
+      engine === "cesium" &&
+      global.ForecastMapCesium &&
+      typeof global.ForecastMapCesium.setBasemap === "function"
+    ) {
+      global.ForecastMapCesium.setBasemap(state.basemap, show);
+    }
+  }
+
   function applyState(state) {
     if (!state) {
       return;
@@ -595,12 +618,15 @@
       projectionOf(previous) === projectionOf(state);
 
     // Same projection/engine: only swap overlay URLs (preserve camera / zoom).
+    // Basemap still needs applying — a style toggle bumps revision with
+    // identical overlay URLs and used to early-return before setBasemap.
     if (
       sameCamera &&
       engine === "openlayers" &&
       global.ForecastMapOpenLayers &&
       typeof global.ForecastMapOpenLayers.applyLeadtime === "function"
     ) {
+      applyBasemapFromState(state);
       // A confirm for a step the browser already swapped in needs no repaint.
       if (layerUrlsKey(previous.layers) === layerUrlsKey(layers)) {
         setTilesReady(true);
@@ -635,6 +661,7 @@
       global.ForecastMapCesium &&
       typeof global.ForecastMapCesium.applyLeadtime === "function"
     ) {
+      applyBasemapFromState(state);
       if (layerUrlsKey(previous.layers) === layerUrlsKey(layers)) {
         setTilesReady(true);
         endDashMapWait();

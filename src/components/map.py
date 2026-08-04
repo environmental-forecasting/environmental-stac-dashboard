@@ -3,7 +3,7 @@
 import dash_leaflet as dl
 from dash import dcc, html
 from dash_iconify import DashIconify
-from map.state import initial_map_state
+from map.state import DEFAULT_BASEMAP_ATTRIBUTION, DEFAULT_BASEMAP_XYZ_URL, initial_map_state
 
 # Default Leaflet camera; OpenLayers Global view is synced in while hidden so
 # switching view modes does not animate into place.
@@ -17,7 +17,8 @@ _leaflet_map = dl.Map(
     [
         dl.TileLayer(
             id="map-base-layer",
-            attribution=("© OpenStreetMap contributors"),
+            url=DEFAULT_BASEMAP_XYZ_URL,
+            attribution=DEFAULT_BASEMAP_ATTRIBUTION,
             zIndex=0,
         ),
         dl.LayersControl([], id="cog-results-layer"),

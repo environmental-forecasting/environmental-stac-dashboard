@@ -20,6 +20,7 @@ def test_initial_map_state_defaults_to_openlayers_global():
     assert state["revision"] == 0
     assert state["view"]["projection"] == "EPSG:3857"
     assert state["view"]["showBasemap"] is True
+    assert "cartocdn.com/rastertiles/voyager" in state["basemap"]["url"]
 
 
 def test_build_map_state_bumps_revision_when_view_changes():

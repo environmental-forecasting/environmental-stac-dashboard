@@ -5,6 +5,7 @@ from typing import Any
 # Keep in sync with controls / header defaults (avoid importing Dash layout).
 DEFAULT_COLORMAP = "blues_r"
 DEFAULT_VIEW_MODE = "global_3857"
+DEFAULT_BASEMAP_ID = "voyager"
 
 
 def normalise_user_prefs(raw: Any) -> dict[str, Any]:
@@ -40,6 +41,10 @@ def normalise_user_prefs(raw: Any) -> dict[str, Any]:
     if isinstance(view_mode, str) and view_mode:
         prefs["view_mode"] = view_mode
 
+    basemap = raw.get("basemap")
+    if isinstance(basemap, str) and basemap:
+        prefs["basemap"] = basemap
+
     colorbar = raw.get("colorbar")
     if isinstance(colorbar, dict) and colorbar.get("locked"):
         try:
@@ -62,6 +67,7 @@ def merge_user_prefs(
     variable: Any = None,
     colormap: Any = None,
     view_mode: Any = None,
+    basemap: Any = None,
     display_style: Any = None,
 ) -> dict[str, Any] | None:
     """Build prefs from live controls. Returns None for factory-only / empty."""
@@ -89,6 +95,9 @@ def merge_user_prefs(
     if isinstance(view_mode, str) and view_mode and view_mode != DEFAULT_VIEW_MODE:
         prefs["view_mode"] = view_mode
 
+    if isinstance(basemap, str) and basemap and basemap != DEFAULT_BASEMAP_ID:
+        prefs["basemap"] = basemap
+
     if isinstance(display_style, dict) and display_style.get("locked"):
         try:
             prefs["colorbar"] = {
@@ -101,11 +110,12 @@ def merge_user_prefs(
 
     if not prefs:
         return None
-    # Factory-only colormap (+ optional default view): clear storage.
-    if set(prefs) <= {"colormap", "view_mode"}:
+    # Factory-only cosmetic prefs: clear storage.
+    if set(prefs) <= {"colormap", "view_mode", "basemap"}:
         if prefs.get("colormap", DEFAULT_COLORMAP) == DEFAULT_COLORMAP:
             if prefs.get("view_mode", DEFAULT_VIEW_MODE) == DEFAULT_VIEW_MODE:
-                return None
+                if prefs.get("basemap", DEFAULT_BASEMAP_ID) == DEFAULT_BASEMAP_ID:
+                    return None
     return prefs
 
 

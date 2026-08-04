@@ -4,6 +4,10 @@
   "use strict";
 
   var HOST_ID = "forecast-map-ol";
+  // Free Carto Voyager (OSM-derived); reprojected into polar/custom views.
+  var DEFAULT_BASEMAP_URL =
+    "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
+  var DEFAULT_BASEMAP_ATTRIBUTION = "© OpenStreetMap contributors © CARTO";
   var forecastLayersById = {};
   // Leadtime / style swaps in flight: the incoming tiles paint above the
   // stable overlay so the previous step stays visible until they are ready.
@@ -332,12 +336,14 @@
 
     basemapLayer = new ol.layer.Tile({
       source: new ol.source.XYZ({
-        url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        attributions: "© OpenStreetMap contributors",
+        url: DEFAULT_BASEMAP_URL,
+        projection: "EPSG:3857",
+        crossOrigin: "anonymous",
+        attributions: DEFAULT_BASEMAP_ATTRIBUTION,
       }),
       zIndex: 0,
     });
-    basemapUrl = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+    basemapUrl = DEFAULT_BASEMAP_URL;
 
     map = new ol.Map({
       target: host,
@@ -437,17 +443,18 @@
       return;
     }
     // Keep the existing XYZ source when the URL is unchanged - recreating it
-    // on every leadtime tick reloads OSM and makes the basemap flicker.
+    // on every leadtime tick reloads the basemap and makes it flicker.
     if (basemap.url === basemapUrl) {
       return;
     }
-    // OSM XYZ is always EPSG:3857; OL reprojects into polar/custom views.
+    // XYZ basemap is EPSG:3857; OL reprojects into polar/custom views.
     basemapLayer.setSource(
       new ol.source.XYZ({
         url: basemap.url,
         projection: "EPSG:3857",
         crossOrigin: "anonymous",
-        attributions: "© OpenStreetMap contributors",
+        attributions:
+          basemap.attribution || DEFAULT_BASEMAP_ATTRIBUTION,
       })
     );
     basemapUrl = basemap.url;
@@ -1387,6 +1394,7 @@
     applyLeadtime: applyLeadtime,
     prefetchLayers: prefetchLayers,
     hasPendingSwap: hasPendingSwap,
+    setBasemap: setBasemap,
     setNorthUpClickEnabled: setNorthUpClickEnabled,
     setNorthUpLockEnabled: setNorthUpLockEnabled,
     resetOrientation: resetOrientation,

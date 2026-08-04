@@ -2,6 +2,7 @@
 
 import dash_mantine_components as dmc
 from dash import dcc, html
+from map.basemap import DEFAULT_BASEMAP_ID, list_basemap_options
 from rio_tiler.colormap import ColorMaps
 
 AVAILABLE_COLORMAPS = ColorMaps().list()
@@ -47,6 +48,14 @@ controls_panel = html.Div(
             id="colormap-dropdown",
             options=[{"label": col, "value": col} for col in AVAILABLE_COLORMAPS],
             value=DEFAULT_COLORMAP,
+            clearable=False,
+            className="forecast-controls__dropdown",
+        ),
+        html.Label("Basemap"),
+        dcc.Dropdown(
+            id="basemap-style",
+            options=list_basemap_options(),
+            value=DEFAULT_BASEMAP_ID,
             clearable=False,
             className="forecast-controls__dropdown",
         ),
