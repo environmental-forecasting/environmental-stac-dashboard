@@ -348,6 +348,15 @@
     // cannot yank the camera back out to the default extent.
     map.on("pointerdrag", clearPendingFit);
     map.on("singleclick", onNorthUpClick);
+    // Keep the hidden Leaflet Global camera aligned while the user pans/zooms.
+    map.on("moveend", function () {
+      if (
+        global.ForecastMap &&
+        typeof global.ForecastMap.syncLeafletCameraFromOpenLayers === "function"
+      ) {
+        global.ForecastMap.syncLeafletCameraFromOpenLayers();
+      }
+    });
     attachNorthUpViewListeners(map.getView());
     syncRotateInteractions();
     var viewport = map.getViewport();
@@ -1017,6 +1026,12 @@
       view.setCenter(ol.proj.fromLonLat([0, 0], projectionCode));
       view.setZoom(0);
     }
+    if (
+      global.ForecastMap &&
+      typeof global.ForecastMap.syncLeafletCameraFromOpenLayers === "function"
+    ) {
+      global.ForecastMap.syncLeafletCameraFromOpenLayers();
+    }
   }
 
   function resumeNorthUpFollow() {
@@ -1341,6 +1356,32 @@
     clearPlaceHighlight();
   }
 
+  function getCameraLonLat() {
+    if (!map) {
+      return null;
+    }
+    var view = map.getView();
+    if (!view) {
+      return null;
+    }
+    var center = view.getCenter();
+    var zoom = view.getZoom();
+    if (!center || zoom == null || !isFinite(zoom)) {
+      return null;
+    }
+    var projection = view.getProjection();
+    var lonLat = ol.proj.toLonLat(center, projection);
+    if (!lonLat || !isFinite(lonLat[0]) || !isFinite(lonLat[1])) {
+      return null;
+    }
+    return {
+      lon: lonLat[0],
+      lat: lonLat[1],
+      zoom: zoom,
+      projection: projection && projection.getCode ? projection.getCode() : null,
+    };
+  }
+
   global.ForecastMapOpenLayers = {
     applyState: applyState,
     applyLeadtime: applyLeadtime,
@@ -1353,5 +1394,6 @@
     isOrientationRotated: isOrientationRotated,
     flyToPlace: flyToPlace,
     clearLastPlace: clearLastPlace,
+    getCameraLonLat: getCameraLonLat,
   };
 })(window);

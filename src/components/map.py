@@ -5,9 +5,10 @@ from dash import dcc, html
 from dash_iconify import DashIconify
 from map.state import initial_map_state
 
-# Default settings
+# Default Leaflet camera; OpenLayers Global view is synced in while hidden so
+# switching view modes does not animate into place.
 DEFAULT_CENTER = [0, 0]
-DEFAULT_ZOOM = 2
+DEFAULT_ZOOM = 0
 
 # Leaflet host (hidden unless the Leaflet view mode is selected).
 # Colourbar lives in the timeline (shared HTML ramp), not on the map face.
@@ -41,7 +42,8 @@ _leaflet_map = dl.Map(
     center=DEFAULT_CENTER,
     zoom=DEFAULT_ZOOM,
     zoomDelta=0.1,
-    zoomSnap=0.1,
+    # Allow fractional zoom so a copied OpenLayers Global camera is not snapped.
+    zoomSnap=0,
     id="map",
 )
 

@@ -524,6 +524,9 @@
     // asked to rebuild layers on every engine / TMS switch.
     if (engine === "openlayers" && global.ForecastMapOpenLayers) {
       global.ForecastMapOpenLayers.applyState(state);
+      // Keep the hidden Leaflet map on the same Global camera so switching
+      // view modes does not animate/zoom into place.
+      syncLeafletCameraFromOpenLayers();
       if (lastPlaceGoto) {
         global.requestAnimationFrame(function () {
           var result = flyTo(lastPlaceGoto);
@@ -824,6 +827,37 @@
         coordinates: [Number(goto.lon), Number(goto.lat)],
       },
     };
+  }
+
+  function syncLeafletCameraFromOpenLayers() {
+    if (
+      !global.dash_clientside ||
+      typeof global.dash_clientside.set_props !== "function"
+    ) {
+      return;
+    }
+    if (
+      !global.ForecastMapOpenLayers ||
+      typeof global.ForecastMapOpenLayers.getCameraLonLat !== "function"
+    ) {
+      return;
+    }
+    var cam = global.ForecastMapOpenLayers.getCameraLonLat();
+    if (!cam) {
+      return;
+    }
+    // Only mirror Web Mercator Global; polar cameras do not map 1:1 to Leaflet.
+    if (cam.projection && cam.projection !== "EPSG:3857") {
+      return;
+    }
+    global.dash_clientside.set_props("map", {
+      viewport: {
+        center: [cam.lat, cam.lon],
+        zoom: cam.zoom,
+        transition: "setView",
+        options: { animate: false },
+      },
+    });
   }
 
   function flyToLeaflet(goto, opts) {
@@ -1217,5 +1251,6 @@
     isOrientationRotated: isOrientationRotated,
     resetOrientation: resetOrientation,
     resetView: resetView,
+    syncLeafletCameraFromOpenLayers: syncLeafletCameraFromOpenLayers,
   };
 })(window);
