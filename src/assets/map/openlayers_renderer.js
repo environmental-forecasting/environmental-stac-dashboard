@@ -590,11 +590,18 @@
   /**
    * Warm tile URLs for the current viewport so the next step paints sooner.
    *
-   * Capped so warming the next leadtime cannot flood TiTiler and starve the
-   * step the user is actually looking at.
+   * Capped so warming neighbouring leadtimes cannot flood TiTiler and starve
+   * the step the user is actually looking at. Viewport range is OL-specific;
+   * the Image() warm itself lives on ForecastMap.prefetchTileImages.
    */
   function prefetchLayers(layers, options) {
     if (!map || !layers || !layers.length || !mapHasSize()) {
+      return;
+    }
+    if (
+      !global.ForecastMap ||
+      typeof global.ForecastMap.prefetchTileImages !== "function"
+    ) {
       return;
     }
     var view = map.getView();
@@ -630,30 +637,14 @@
     }
     var maxTiles =
       options && options.maxTiles != null ? Number(options.maxTiles) : 8;
-    if (isNaN(maxTiles) || maxTiles < 1) {
-      maxTiles = 8;
-    }
-    var queued = 0;
-    var i;
-    var x;
-    var y;
-    for (i = 0; i < layers.length; i += 1) {
-      var template = layers[i] && layers[i].tileUrl;
-      if (!template || typeof template !== "string") {
-        continue;
-      }
-      for (x = range.minX; x <= range.maxX && queued < maxTiles; x += 1) {
-        for (y = range.minY; y <= range.maxY && queued < maxTiles; y += 1) {
-          var image = new Image();
-          image.crossOrigin = "anonymous";
-          image.src = template
-            .replace("{z}", String(z))
-            .replace("{x}", String(x))
-            .replace("{y}", String(y));
-          queued += 1;
-        }
-      }
-    }
+    global.ForecastMap.prefetchTileImages(layers, {
+      z: z,
+      minX: range.minX,
+      maxX: range.maxX,
+      minY: range.minY,
+      maxY: range.maxY,
+      maxTiles: maxTiles,
+    });
   }
 
   function setHostVisible(visible) {

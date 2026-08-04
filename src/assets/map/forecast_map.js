@@ -12,7 +12,7 @@
  *
  * Scrubbing and playback swap overlay URLs from the `leadtimeCogUrls` cache
  * that Python publishes with each rebuild, so a leadtime step paints without
- * a Dash round trip.
+ * a Dash round trip on OpenLayers and Cesium.
  *
  * Busy banner ownership: Dash owns catalog / dates / variables / map labels
  * on `#forecast-busy`. This module only shows "Loading tiles…" after a soft
@@ -31,10 +31,14 @@
   // Playback gates on tilesReady; keep this short so a missed rendercomplete
   // cannot freeze Play for tens of seconds when switching TMS / engines.
   var READY_TIMEOUT_MS = 4000;
-  // Warm the next step only once the current one has had a head start, so
-  // prefetching cannot compete with the tiles the user is waiting on.
+  // Prefetching cannot compete with the tiles the user is waiting on.
   var PREFETCH_DELAY_MS = 600;
   var prefetchTimer = null;
+  // Warm a window around the current lead (±radius), near leads first.
+  var PREFETCH_RADIUS = 4;
+  // Hard cap on total Image() kicks across the whole window.
+  var PREFETCH_MAX_TILES_TOTAL = 32;
+  var PREFETCH_MAX_TILES_PER_LEAD = 6;
   // Optimistic engine switches use revisions above this so a later Python
   // map-state publish (revision N+1) still applies.
   var LOCAL_REVISION_BASE = 1000000000;
@@ -336,31 +340,169 @@
     lastState = Object.assign({}, lastState, { leadtimeCogUrls: null });
   }
 
+  function activePrefetchFn() {
+    if (
+      activeEngine === "openlayers" &&
+      global.ForecastMapOpenLayers &&
+      typeof global.ForecastMapOpenLayers.prefetchLayers === "function"
+    ) {
+      return global.ForecastMapOpenLayers.prefetchLayers;
+    }
+    if (
+      activeEngine === "cesium" &&
+      global.ForecastMapCesium &&
+      typeof global.ForecastMapCesium.prefetchLayers === "function"
+    ) {
+      return global.ForecastMapCesium.prefetchLayers;
+    }
+    return null;
+  }
+
+  /**
+   * Warm neighbouring leadtimes from `leadtimeCogUrls` (feat-branch style).
+   *
+   * Walks ±radius with near offsets first, spending a shared Image() budget
+   * so play and scrub stay snappy without flooding TiTiler.
+   */
   function schedulePrefetch(state) {
     if (prefetchTimer) {
       clearTimeout(prefetchTimer);
       prefetchTimer = null;
     }
-    var layers = state && state.prefetchLayers;
+    if (!state || !activePrefetchFn()) {
+      return;
+    }
+    var cache = state.leadtimeCogUrls;
+    var currentLead = state.lead;
     if (
-      !layers ||
-      !layers.length ||
-      !global.ForecastMapOpenLayers ||
-      typeof global.ForecastMapOpenLayers.prefetchLayers !== "function"
+      cache &&
+      cache.collections &&
+      currentLead != null &&
+      !isNaN(Number(currentLead))
     ) {
+      var lead = Number(currentLead);
+      prefetchTimer = setTimeout(function () {
+        prefetchTimer = null;
+        // A newer frame arrived while waiting; its own prefetch takes over.
+        if (lastState !== state) {
+          return;
+        }
+        var prefetchFn = activePrefetchFn();
+        if (!prefetchFn) {
+          return;
+        }
+        // Prefer freshest lead if the user kept scrubbing during the delay.
+        var centre =
+          lastState && lastState.lead != null && !isNaN(Number(lastState.lead))
+            ? Number(lastState.lead)
+            : lead;
+        var bank =
+          (lastState && lastState.leadtimeCogUrls) || cache;
+        var remaining = PREFETCH_MAX_TILES_TOTAL;
+        var d;
+        for (d = 1; d <= PREFETCH_RADIUS && remaining > 0; d += 1) {
+          var offsets = [d, -d];
+          var oi;
+          for (oi = 0; oi < offsets.length && remaining > 0; oi += 1) {
+            var step = centre + offsets[oi];
+            if (step < 0) {
+              continue;
+            }
+            var layers = layersFromLeadtimeCogUrls(bank, step);
+            if (!layers.length) {
+              continue;
+            }
+            var budget = Math.min(PREFETCH_MAX_TILES_PER_LEAD, remaining);
+            prefetchFn(layers, {
+              maxTiles: budget,
+              zDelta: -1,
+            });
+            remaining -= budget;
+          }
+        }
+      }, PREFETCH_DELAY_MS);
+      return;
+    }
+    // Fallback: explicit prefetchLayers from Python (lead+1).
+    if (!state.prefetchLayers || !state.prefetchLayers.length) {
       return;
     }
     prefetchTimer = setTimeout(function () {
       prefetchTimer = null;
-      // A newer frame arrived while waiting; its own prefetch takes over.
       if (lastState !== state) {
         return;
       }
-      global.ForecastMapOpenLayers.prefetchLayers(layers, {
-        maxTiles: 6,
+      var prefetchFn = activePrefetchFn();
+      if (!prefetchFn) {
+        return;
+      }
+      prefetchFn(state.prefetchLayers, {
+        maxTiles: PREFETCH_MAX_TILES_PER_LEAD,
         zDelta: -1,
       });
     }, PREFETCH_DELAY_MS);
+  }
+
+  /**
+   * Warm XYZ `{z}/{x}/{y}` templates into the browser (and TiTiler) cache.
+   *
+   * Shared by OpenLayers and Cesium: each renderer computes its own viewport
+   * tile range, then this fills Image() requests up to maxTiles.
+   *
+   * @param {Array<{tileUrl?: string}|string>} layersOrUrls
+   * @param {{z: number, minX: number, maxX: number, minY: number, maxY: number, maxTiles?: number}} range
+   */
+  function prefetchTileImages(layersOrUrls, range) {
+    if (!layersOrUrls || !layersOrUrls.length || !range) {
+      return;
+    }
+    var z = range.z;
+    if (z == null || isNaN(Number(z))) {
+      return;
+    }
+    z = Math.round(Number(z));
+    var minX = Number(range.minX);
+    var maxX = Number(range.maxX);
+    var minY = Number(range.minY);
+    var maxY = Number(range.maxY);
+    if (
+      !isFinite(minX) ||
+      !isFinite(maxX) ||
+      !isFinite(minY) ||
+      !isFinite(maxY)
+    ) {
+      return;
+    }
+    var maxTiles =
+      range.maxTiles != null ? Number(range.maxTiles) : 8;
+    if (isNaN(maxTiles) || maxTiles < 1) {
+      maxTiles = 8;
+    }
+    var queued = 0;
+    var i;
+    var x;
+    var y;
+    for (i = 0; i < layersOrUrls.length; i += 1) {
+      var entry = layersOrUrls[i];
+      var template =
+        typeof entry === "string"
+          ? entry
+          : entry && entry.tileUrl;
+      if (!template || typeof template !== "string") {
+        continue;
+      }
+      for (x = minX; x <= maxX && queued < maxTiles; x += 1) {
+        for (y = minY; y <= maxY && queued < maxTiles; y += 1) {
+          var image = new Image();
+          image.crossOrigin = "anonymous";
+          image.src = template
+            .replace("{z}", String(z))
+            .replace("{x}", String(x))
+            .replace("{y}", String(y));
+          queued += 1;
+        }
+      }
+    }
   }
 
   /**
@@ -378,15 +520,11 @@
     if (!layers.length) {
       return false;
     }
-    if (activeEngine !== "openlayers") {
-      // Other hosts still wait on Python; keep the tracked lead in step.
+    if (layerUrlsKey(lastState.layers) === layerUrlsKey(layers)) {
       lastState = Object.assign({}, lastState, {
         layers: layers,
         lead: nextLead,
       });
-      return false;
-    }
-    if (layerUrlsKey(lastState.layers) === layerUrlsKey(layers)) {
       setTilesReady(true);
       return true;
     }
@@ -402,6 +540,7 @@
       lead: nextLead,
     });
     if (
+      activeEngine === "openlayers" &&
       global.ForecastMapOpenLayers &&
       typeof global.ForecastMapOpenLayers.applyLeadtime === "function"
     ) {
@@ -410,11 +549,26 @@
       global.ForecastMapOpenLayers.applyLeadtime(layers, {
         holdUntilReady: holdUntilReady,
       });
-    } else {
-      setTilesReady(true);
+      schedulePrefetch(lastState);
+      return true;
     }
-    schedulePrefetch(lastState);
-    return true;
+    if (
+      activeEngine === "cesium" &&
+      global.ForecastMapCesium &&
+      typeof global.ForecastMapCesium.applyLeadtime === "function"
+    ) {
+      // Keep the previous forecast painted until the new imagery is ready.
+      global.ForecastMapCesium.applyLeadtime(layers, {
+        holdUntilReady: holdUntilReady,
+      });
+      schedulePrefetch(lastState);
+      return true;
+    }
+    // Leaflet (and any host without a soft-swap path) still confirms via
+    // Python when not playing; clear the play gate so ticks are not stuck on
+    // the ready timeout while the overlay is unchanged client-side.
+    setTilesReady(true);
+    return false;
   }
 
   function applyState(state) {
@@ -468,6 +622,36 @@
         setTilesReady(true);
         endDashMapWait();
         global.ForecastMapOpenLayers.applyLeadtime(layers, {
+          holdUntilReady: true,
+        });
+      }
+      schedulePrefetch(state);
+      return;
+    }
+
+    if (
+      sameCamera &&
+      engine === "cesium" &&
+      global.ForecastMapCesium &&
+      typeof global.ForecastMapCesium.applyLeadtime === "function"
+    ) {
+      if (layerUrlsKey(previous.layers) === layerUrlsKey(layers)) {
+        setTilesReady(true);
+        endDashMapWait();
+        schedulePrefetch(state);
+        return;
+      }
+      if (layers.length) {
+        setTilesReady(false);
+        setBusy("Loading tiles…", "tiles");
+        global.ForecastMapCesium.applyLeadtime(layers, {
+          holdUntilReady: true,
+          waitForTiles: true,
+        });
+      } else {
+        setTilesReady(true);
+        endDashMapWait();
+        global.ForecastMapCesium.applyLeadtime(layers, {
           holdUntilReady: true,
         });
       }
@@ -1240,6 +1424,7 @@
     clearLeadtimeCogUrls: clearLeadtimeCogUrls,
     setTilesReady: setTilesReady,
     isTilesReady: isTilesReady,
+    prefetchTileImages: prefetchTileImages,
     setBusy: setBusy,
     clearBusy: clearBusy,
     flyTo: flyTo,

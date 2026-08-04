@@ -693,6 +693,11 @@ def register_callbacks(app: dash.Dash):
                     && window.ForecastMapOpenLayers.hasPendingSwap()) {
                 return [nu, true, false];
             }
+            if (window.ForecastMapCesium
+                    && typeof window.ForecastMapCesium.hasPendingSwap === "function"
+                    && window.ForecastMapCesium.hasPendingSwap()) {
+                return [nu, true, false];
+            }
             window.__forecastTimelineProgrammatic = true;
             if (window.ForecastMap && window.ForecastMap.setTilesReady) {
                 window.ForecastMap.setTilesReady(false);
