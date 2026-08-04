@@ -966,6 +966,149 @@
     });
   }
 
+  function mapSearchHitButtons() {
+    var root = document.getElementById("map-search-suggestions");
+    if (!root) {
+      return [];
+    }
+    return Array.prototype.slice.call(
+      root.querySelectorAll("[data-search-index]")
+    );
+  }
+
+  function setMapSearchActive(index) {
+    var hits = mapSearchHitButtons();
+    if (!hits.length) {
+      return;
+    }
+    var next = ((index % hits.length) + hits.length) % hits.length;
+    hits.forEach(function (btn, i) {
+      var on = i === next;
+      btn.classList.toggle("is-active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+      if (on && typeof btn.scrollIntoView === "function") {
+        btn.scrollIntoView({ block: "nearest" });
+      }
+    });
+    if (
+      global.dash_clientside &&
+      typeof global.dash_clientside.set_props === "function"
+    ) {
+      global.dash_clientside.set_props("map-search-active", { data: next });
+    }
+  }
+
+  function currentMapSearchActive() {
+    var hits = mapSearchHitButtons();
+    for (var i = 0; i < hits.length; i += 1) {
+      if (hits[i].classList.contains("is-active")) {
+        return i;
+      }
+    }
+    return hits.length ? 0 : -1;
+  }
+
+  function onMapSearchKeydown(event) {
+    var input = document.getElementById("map-search-query");
+    if (!input || document.activeElement !== input) {
+      return;
+    }
+    var panel = document.getElementById("map-search");
+    var open = panel && panel.classList.contains("has-results");
+    var hits = mapSearchHitButtons();
+    var key = event.key;
+
+    if (key === "Escape") {
+      event.preventDefault();
+      if (open) {
+        if (panel) {
+          panel.classList.remove("has-results");
+        }
+        if (
+          global.dash_clientside &&
+          typeof global.dash_clientside.set_props === "function"
+        ) {
+          global.dash_clientside.set_props("map-search", {
+            className: "forecast-map-search",
+          });
+          global.dash_clientside.set_props("map-search-active", { data: -1 });
+        }
+        return;
+      }
+      var shell = document.getElementById("map-search-shell");
+      if (shell && !shell.classList.contains("is-collapsed")) {
+        if (
+          global.dash_clientside &&
+          typeof global.dash_clientside.set_props === "function"
+        ) {
+          global.dash_clientside.set_props("map-search-shell", {
+            className: "forecast-map-search-shell is-collapsed",
+          });
+        } else {
+          shell.classList.add("is-collapsed");
+        }
+        input.blur();
+      }
+      return;
+    }
+
+    if (!open || !hits.length) {
+      return;
+    }
+
+    if (key === "ArrowDown") {
+      event.preventDefault();
+      setMapSearchActive(currentMapSearchActive() + 1);
+      return;
+    }
+    if (key === "ArrowUp") {
+      event.preventDefault();
+      setMapSearchActive(currentMapSearchActive() - 1);
+      return;
+    }
+    if (key === "Home") {
+      event.preventDefault();
+      setMapSearchActive(0);
+      return;
+    }
+    if (key === "End") {
+      event.preventDefault();
+      setMapSearchActive(hits.length - 1);
+    }
+    // Enter is handled by Dash n_submit using map-search-active.
+  }
+
+  function ensureMapSearchKeys() {
+    if (global.__mapSearchKeysBound) {
+      return;
+    }
+    global.__mapSearchKeysBound = true;
+    document.addEventListener("keydown", onMapSearchKeydown);
+    document.addEventListener("mouseover", function (event) {
+      var btn =
+        event.target && event.target.closest
+          ? event.target.closest("[data-search-index]")
+          : null;
+      if (!btn) {
+        return;
+      }
+      var panel = document.getElementById("map-search");
+      if (!panel || !panel.classList.contains("has-results")) {
+        return;
+      }
+      var index = Number(btn.getAttribute("data-search-index"));
+      if (!isFinite(index)) {
+        return;
+      }
+      if (btn.classList.contains("is-active")) {
+        return;
+      }
+      setMapSearchActive(index);
+    });
+  }
+
+  ensureMapSearchKeys();
+
   global.ForecastMap = {
     applyState: applyState,
     applyEngine: applyEngine,

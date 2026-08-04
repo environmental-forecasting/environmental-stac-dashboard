@@ -153,6 +153,7 @@ leaflet_map = html.Div(
                         dcc.Store(id="map-search-debounced", data=None),
                         dcc.Store(id="map-search-hits", data=[]),
                         dcc.Store(id="map-search-committed", data=None),
+                        dcc.Store(id="map-search-active", data=-1),
                     ],
                     id="map-search",
                     className="forecast-map-search",

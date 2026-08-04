@@ -57,6 +57,12 @@ def _suggestion_children(hits: list[dict], *, active_index: int = 0) -> list:
                 type="button",
                 className=classes,
                 title=hit.get("label") or title,
+                role="option",
+                tabIndex=-1,
+                **{
+                    "data-search-index": str(index),
+                    "aria-selected": "true" if index == active_index else "false",
+                },
             )
         )
     return children
@@ -75,7 +81,7 @@ def _coord_hit(lon: float, lat: float) -> dict:
 
 def _closed_panel(status):
     """Outputs for an empty, closed suggestion panel."""
-    return [_search_hit_sentinel()], [], status, "forecast-map-search"
+    return [_search_hit_sentinel()], [], status, "forecast-map-search", -1
 
 
 def _map_search_suggest(debounced, committed, view_mode):
@@ -88,7 +94,7 @@ def _map_search_suggest(debounced, committed, view_mode):
     # Ignore the fill that follows a pick so the list does not reopen.
     # Leave status alone: the flyTo clientside owns the coverage warning.
     if q and q == committed_q.strip():
-        return [_search_hit_sentinel()], [], no_update, "forecast-map-search"
+        return [_search_hit_sentinel()], [], no_update, "forecast-map-search", -1
     if len(q) < 2:
         return _closed_panel("")
 
@@ -101,6 +107,7 @@ def _map_search_suggest(debounced, committed, view_mode):
             hits,
             "",
             "forecast-map-search has-results",
+            0,
         )
 
     finder = place_search()
@@ -112,6 +119,7 @@ def _map_search_suggest(debounced, committed, view_mode):
         hits,
         finder.attribution_for_hits(hits),
         "forecast-map-search has-results",
+        0,
     )
 
 
@@ -131,10 +139,11 @@ def _map_search_commit(lon, lat, zoom, label, *, bbox=None, geojson=None):
         "forecast-map-search",
         text,
         {"q": text, "ts": time.time()},
+        -1,
     )
 
 
-def _map_search_choose(hit_clicks, n_submit, hits, query, view_mode):
+def _map_search_choose(hit_clicks, n_submit, hits, query, active_index, view_mode):
     """Handle a suggestion click or Enter: emit map-goto for the clientside fly."""
     triggered = callback_context.triggered_id
 
@@ -147,7 +156,12 @@ def _map_search_choose(hit_clicks, n_submit, hits, query, view_mode):
             lon, lat = parsed
             return _map_search_commit(lon, lat, _COORD_ZOOM, _coord_hit(lon, lat)["label"])
         if hits:
-            chosen = hits[0]
+            index = (
+                active_index
+                if isinstance(active_index, int) and 0 <= active_index < len(hits)
+                else 0
+            )
+            chosen = hits[index]
             return _map_search_commit(
                 chosen["lon"],
                 chosen["lat"],
@@ -206,6 +220,7 @@ def _map_search_clear(n_clicks):
         "forecast-map-search",
         None,
         None,
+        -1,
     )
 
 
@@ -254,6 +269,7 @@ def register_callbacks(app: dash.Dash):
         Output("map-search-hits", "data"),
         Output("map-search-status", "children"),
         Output("map-search", "className"),
+        Output("map-search-active", "data"),
         Input("map-search-debounced", "data"),
         State("map-search-committed", "data"),
         State("map-view-mode", "value"),
@@ -268,10 +284,12 @@ def register_callbacks(app: dash.Dash):
         Output("map-search", "className", allow_duplicate=True),
         Output("map-search-query", "value"),
         Output("map-search-committed", "data"),
+        Output("map-search-active", "data", allow_duplicate=True),
         Input({"type": "map-search-hit", "index": ALL}, "n_clicks"),
         Input("map-search-query", "n_submit"),
         State("map-search-hits", "data"),
         State("map-search-query", "value"),
+        State("map-search-active", "data"),
         State("map-view-mode", "value"),
         prevent_initial_call=True,
     )(_map_search_choose)
@@ -286,6 +304,7 @@ def register_callbacks(app: dash.Dash):
         Output("map-search", "className", allow_duplicate=True),
         Output("map-search-debounced", "data", allow_duplicate=True),
         Output("map-search-highlight", "data", allow_duplicate=True),
+        Output("map-search-active", "data", allow_duplicate=True),
         Input("map-search-clear", "n_clicks"),
         prevent_initial_call=True,
     )(_map_search_clear)
