@@ -27,6 +27,7 @@ from .projections import (
     view_mode_and_hint,
 )
 from .state import build_map_state, initial_map_state
+from .request import build_map_request, collections_list, recipe_complete
 from .tile_urls import (
     build_cog_tile_url,
     rewrite_layer_entries_style,
@@ -48,8 +49,10 @@ __all__ = [
     "build_cog_tile_url",
     "build_leadtime_cog_urls",
     "build_map_state",
+    "build_map_request",
     "clear_tile_grid_cache",
     "collection_fits_view_mode",
+    "collections_list",
     "epsg_code_for_mode",
     "get_tile_grid",
     "initial_map_state",
@@ -62,6 +65,7 @@ __all__ = [
     "list_view_mode_presets",
     "normalise_view_mode",
     "proj4_for_epsg",
+    "recipe_complete",
     "resolve_mode_and_engine",
     "resolve_engine_for_mode",
     "resolve_view_mode",
