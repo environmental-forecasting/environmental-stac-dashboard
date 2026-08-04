@@ -6,6 +6,21 @@ DEFAULT_COLORMAP = "blues_r"
 DEFAULT_VIEW_MODE = "global_3857"
 
 
+def resolve_live_colormap(*candidates: Any) -> str:
+    """
+    Return the first non-empty colormap name, else ``DEFAULT_COLORMAP``.
+
+    Callers choose preference order. Leadtime confirms must put the live
+    dropdown / display-style ahead of a stale map-request value: locked
+    colormap edits skip ``publish_map_request``, so that store can lag the
+    tiles and the dropdown.
+    """
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return DEFAULT_COLORMAP
+
+
 def collections_list(value: Any) -> list[str]:
     if isinstance(value, str) and value:
         return [value]

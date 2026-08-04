@@ -40,7 +40,12 @@ from .projections import (
     view_hint_for_mode,
     view_mode_and_hint,
 )
-from .request import build_map_request, collections_list, recipe_complete
+from .request import (
+    build_map_request,
+    collections_list,
+    recipe_complete,
+    resolve_live_colormap,
+)
 from .state import build_map_state, default_basemap, initial_map_state
 from .tile_urls import (
     build_cog_tile_url,
@@ -93,6 +98,7 @@ __all__ = [
     "OSM_XYZ_URL",
     "proj4_for_epsg",
     "recipe_complete",
+    "resolve_live_colormap",
     "resolve_mode_and_engine",
     "resolve_engine_for_mode",
     "resolve_view_mode",

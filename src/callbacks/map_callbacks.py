@@ -51,6 +51,7 @@ from map import (
     build_map_request,
     build_map_state,
     collections_list,
+    resolve_live_colormap,
     initial_map_state,
     layers_from_leadtime_cog_urls,
     leadtime_cog_urls_match_style,
@@ -1436,12 +1437,21 @@ def register_callbacks(app: dash.Dash):
             # force=True: update_leadtime_slider rewound for a new init.
             # Routine confirms stay leadtime_only so play ticks skip Python.
             leadtime_only = not bool(leadtime_confirm.get("force"))
+            # Prefer the live dropdown / display-style over a stale request.
+            # Locked colormap edits skip this publisher, so prev.colormap can
+            # still be blues_r while play soft-swaps the user's ramp from the
+            # rewritten leadtimeCogUrls cache — and Pause would snap back.
+            style_cmap = normalise_display_style(display_style).get("colormap")
             return build_map_request(
                 prev,
                 collection=prev["collection"],
                 forecast_start=prev["forecast_start"],
                 variable=prev["variable"],
-                colormap=prev.get("colormap") or colormap,
+                colormap=resolve_live_colormap(
+                    colormap,
+                    style_cmap,
+                    prev.get("colormap"),
+                ),
                 view_mode=map_view_mode or prev.get("view_mode"),
                 lead=lead,
                 force_stats=False,
@@ -1599,7 +1609,21 @@ def register_callbacks(app: dash.Dash):
             style["locked"] = False
             style["source"] = "stats"
 
-        active_colormap = colormap or style.get("colormap") or DEFAULT_COLORMAP
+        # Leadtime confirms should honour the ramp already on screen
+        # (display-style / soft-swap cache). map-request.colormap can lag after
+        # locked colormap edits, which skip publish_map_request.
+        # All other paints take the request first so unlocked colormap_only
+        # applies before display-style is rewritten in this same callback.
+        if leadtime_only:
+            active_colormap = resolve_live_colormap(
+                style.get("colormap"),
+                colormap,
+            )
+        else:
+            active_colormap = resolve_live_colormap(
+                colormap,
+                style.get("colormap"),
+            )
 
         ui_mode = map_view_mode or MapViewMode.GLOBAL_3857.value
         requested_mode, _ = resolve_mode_and_engine(ui_mode)

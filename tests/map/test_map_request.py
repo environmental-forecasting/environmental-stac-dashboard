@@ -7,9 +7,11 @@ SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 sys.path.insert(0, str(SRC_DIR))
 
 from map.request import (  # noqa: E402
+    DEFAULT_COLORMAP,
     build_map_request,
     collections_list,
     recipe_complete,
+    resolve_live_colormap,
 )
 
 
@@ -91,3 +93,13 @@ def test_build_map_request_bumps_revision_and_defaults():
     assert second["leadtime_only"] is True
     assert second["tms_only"] is True
     assert second["colormap_only"] is True
+
+
+def test_resolve_live_colormap_prefers_first_nonempty():
+    assert resolve_live_colormap("viridis", "blues_r") == "viridis"
+    assert resolve_live_colormap(None, "", "plasma") == "plasma"
+    # Pause/confirm: live dropdown wins over a stale map-request blues_r.
+    assert (
+        resolve_live_colormap("turbo", "turbo", "blues_r") == "turbo"
+    )
+    assert resolve_live_colormap(None, None, None) == DEFAULT_COLORMAP
