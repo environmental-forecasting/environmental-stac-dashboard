@@ -405,6 +405,12 @@
     var extent = (view && view.extent) || worldExtentFor(projectionCode);
     if (extent) {
       options.extent = extent;
+      // Full-viewport extent + non-zero rotation shrinks the allowed centre
+      // so polar corners become unreachable after North up. Constrain centre
+      // only so those corners can still be panned on-screen.
+      if (projectionCode !== "EPSG:3857") {
+        options.constrainOnlyCenter = true;
+      }
     }
     return new ol.View(options);
   }
@@ -487,6 +493,9 @@
           projection: projectionCode,
           extent: view.extent,
           showFullExtent: true,
+          // See createGlobalView: rotated viewport + full extent constraint
+          // otherwise blocks panning to polar map corners.
+          constrainOnlyCenter: true,
         });
       } else {
         nextView = createGlobalView(view);
