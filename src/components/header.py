@@ -7,11 +7,12 @@ header_layout = html.Div(
     className="forecast-header",
     children=[
         html.A(
-            "IceNet",
+            "Forecast dashboard",
             href="https://icenet.ai",
             className="forecast-header__brand",
             target="_blank",
             rel="noopener noreferrer",
+            title="environmental-forecasting-dashboard",
         ),
         html.Div(
             dcc.RadioItems(
@@ -49,9 +50,33 @@ header_layout = html.Div(
             class_name="forecast-header__bas",
             children=[
                 dbc.DropdownMenuItem("British Antarctic Survey", header=True),
-                dbc.DropdownMenuItem("BAS Home", href="https://www.bas.ac.uk/"),
                 dbc.DropdownMenuItem(
-                    "Discover BAS Data", href="https://data.bas.ac.uk/"
+                    "BAS Home",
+                    href="https://www.bas.ac.uk/",
+                    external_link=True,
+                    target="_blank",
+                ),
+                dbc.DropdownMenuItem(
+                    "Discover BAS Data",
+                    href="https://data.bas.ac.uk/",
+                    external_link=True,
+                    target="_blank",
+                ),
+                dbc.DropdownMenuItem(divider=True),
+                dbc.DropdownMenuItem(
+                    "Cookies",
+                    id="legal-open-header-cookies",
+                    n_clicks=0,
+                ),
+                dbc.DropdownMenuItem(
+                    "Copyright",
+                    id="legal-open-header-copyright",
+                    n_clicks=0,
+                ),
+                dbc.DropdownMenuItem(
+                    "Privacy",
+                    id="legal-open-header-privacy",
+                    n_clicks=0,
                 ),
             ],
         ),

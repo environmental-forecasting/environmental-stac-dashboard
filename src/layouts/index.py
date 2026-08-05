@@ -1,6 +1,6 @@
 import dash_bootstrap_components as dbc
 import dash_mantine_components as dmc
-from components import controls, footer, header, map, timeline
+from components import controls, footer, header, legal, map, timeline
 from dash import _dash_renderer, dcc, html
 from dash_iconify import DashIconify
 
@@ -51,6 +51,7 @@ layout = dmc.MantineProvider(
                 className="app-shell__main",
             ),
             html.Div(footer.footer_layout, className="app-shell__footer"),
+            legal.legal_modals,
         ],
     )
 )

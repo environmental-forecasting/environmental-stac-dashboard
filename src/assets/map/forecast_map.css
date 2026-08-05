@@ -166,6 +166,83 @@
   color: #fff;
 }
 
+.site-footer--compact .legal-open-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: #c5cede;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.site-footer--compact .legal-open-link:hover,
+.site-footer--compact .legal-open-link:focus-visible {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.legal-modal .modal-content {
+  background: #0f1520;
+  color: #e8ecf4;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.legal-modal .modal-header,
+.legal-modal .modal-footer {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.legal-modal .modal-title {
+  color: #f2f5fb;
+}
+
+.legal-modal__heading {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1rem 0 0.4rem;
+  color: #f2f5fb;
+}
+
+.legal-modal__section:first-child .legal-modal__heading {
+  margin-top: 0;
+}
+
+.legal-modal__body p,
+.legal-modal__body li {
+  color: #c5cede;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.legal-modal__body a {
+  color: #9ec5f7;
+  text-decoration: underline;
+}
+
+.legal-modal__body a:hover {
+  color: #d0e4ff;
+}
+
+.legal-modal__body ul {
+  margin: 0.25rem 0 0.75rem 1.1rem;
+  padding: 0;
+}
+
+.legal-modal__close {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e8ecf4;
+}
+
+.legal-modal__close:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
 /* Same centred Bootstrap container as the header navbar. */
 .site-footer__inner.container {
   display: flex !important;

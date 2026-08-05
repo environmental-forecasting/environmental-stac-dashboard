@@ -2,7 +2,7 @@ import dash
 import dash_bootstrap_components as dbc
 import dash_mantine_components as dmc
 from layouts import index
-from callbacks import map_callbacks, place_search
+from callbacks import legal, map_callbacks, place_search
 
 BAS_STYLE_KIT_VERSION = "0.7.3"
 TABLER_ICONS_VERSION = "3.34.1"
@@ -41,7 +41,7 @@ app = dash.Dash(
         }
     ],
 )
-app.title = "IceNet Visualiser"
+app.title = "Forecasting Dashboard"
 
 # Cesium workers and assets need this before Cesium.js runs.
 app.index_string = f"""<!DOCTYPE html>
@@ -67,6 +67,7 @@ app.index_string = f"""<!DOCTYPE html>
 # Register the callbacks
 map_callbacks.register_callbacks(app)
 place_search.register_callbacks(app)
+legal.register_callbacks(app)
 
 app.layout = index.layout
 server = app.server

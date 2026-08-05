@@ -1,5 +1,20 @@
 import datetime as dt
+
+from components.legal import legal_open_control
 from dash import html
+
+_BAS_HOME = "https://www.bas.ac.uk/"
+_UKRI_HOME = "https://www.ukri.org/"
+
+
+def _external_link(label: str, href: str) -> html.A:
+    return html.A(
+        label,
+        href=href,
+        target="_blank",
+        rel="noopener noreferrer",
+    )
+
 
 footer_layout = html.Footer(
     className="site-footer site-footer--compact",
@@ -16,14 +31,12 @@ footer_layout = html.Footer(
                                 html.Span(
                                     [
                                         "The ",
-                                        html.A(
-                                            "British Antarctic Survey",
-                                            href="https://www.bas.ac.uk/",
+                                        _external_link(
+                                            "British Antarctic Survey", _BAS_HOME
                                         ),
                                         " (BAS) is part of ",
-                                        html.A(
-                                            "UK Research and Innovation",
-                                            href="https://www.ukri.org/",
+                                        _external_link(
+                                            "UK Research and Innovation", _UKRI_HOME
                                         ),
                                         " (UKRI)",
                                     ],
@@ -37,9 +50,21 @@ footer_layout = html.Footer(
                                 html.Ul(
                                     className="bsk-list-inline site-footer__links",
                                     children=[
-                                        html.Li(html.A("Cookies", href="/cookies")),
-                                        html.Li(html.A("Copyright", href="/copyright")),
-                                        html.Li(html.A("Privacy", href="/privacy")),
+                                        html.Li(
+                                            legal_open_control(
+                                                "cookies", source="footer"
+                                            )
+                                        ),
+                                        html.Li(
+                                            legal_open_control(
+                                                "copyright", source="footer"
+                                            )
+                                        ),
+                                        html.Li(
+                                            legal_open_control(
+                                                "privacy", source="footer"
+                                            )
+                                        ),
                                         html.Li(
                                             f"{dt.date.today().year} BAS",
                                             className="site-footer__year",
