@@ -26,13 +26,15 @@ def test_layers_from_leadtime_cog_urls_builds_styled_urls():
                 "hrefs": [
                     "file:///data/cogs/a.tif",
                     "file:///data/cogs/b.tif",
-                ]
+                ],
+                "bbox": [-180.0, -90.0, 180.0, -50.0],
             }
         },
     }
     layers = layers_from_leadtime_cog_urls(cache, 1)
     assert len(layers) == 1
     assert layers[0]["id"] == "demo"
+    assert layers[0]["bbox"] == [-180.0, -90.0, 180.0, -50.0]
     assert "file:///data/cogs/b.tif" in layers[0]["tileUrl"]
     assert "colormap_name=blues_r" in layers[0]["tileUrl"]
     assert "rescale=0.0,1.0" in layers[0]["tileUrl"]
@@ -48,6 +50,7 @@ def test_build_leadtime_cog_urls_publishes_hrefs_per_collection():
             "demo": ["file:///data/a.tif", "file:///data/b.tif"],
             "empty": [],
         },
+        bbox_by_collection={"demo": [-40.0, -80.0, 40.0, -55.0]},
         colormap="blues_r",
         rescale=(0, 1),
         band_index=2,
@@ -60,11 +63,13 @@ def test_build_leadtime_cog_urls_publishes_hrefs_per_collection():
     assert payload["refTime"] == "2024-01-01T00:00:00Z"
     assert list(payload["collections"]) == ["demo"]
     assert len(payload["collections"]["demo"]["hrefs"]) == 2
+    assert payload["collections"]["demo"]["bbox"] == [-40.0, -80.0, 40.0, -55.0]
 
     # The payload feeds the same URL builder the browser mirrors.
     layers = layers_from_leadtime_cog_urls(payload, 0)
     assert len(layers) == 1
     assert "file:///data/a.tif" in layers[0]["tileUrl"]
+    assert layers[0]["bbox"] == [-40.0, -80.0, 40.0, -55.0]
 
 
 def test_build_leadtime_cog_urls_returns_none_without_hrefs():

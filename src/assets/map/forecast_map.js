@@ -318,6 +318,7 @@
         tileUrl: tileUrl,
         opacity: 1,
         visible: true,
+        bbox: meta.bbox || null,
       });
     }
     return layers;
@@ -529,8 +530,8 @@
       return true;
     }
     var previousLead = lastState.lead;
-    // A jump of more than one step (first / last, long drag) would show a
-    // mottled mix of old and new tiles, so hold the incoming frame back.
+    // Adjacent scrub/play uses progressive reveal (previous tiles show through).
+    // Jumps hold the incoming frame until ready so mixed old/new tiles never flash.
     var holdUntilReady =
       previousLead != null &&
       !isNaN(Number(previousLead)) &&
@@ -564,9 +565,33 @@
       schedulePrefetch(lastState);
       return true;
     }
-    // Leaflet (and any host without a soft-swap path) still confirms via
-    // Python when not playing; clear the play gate so ticks are not stuck on
-    // the ready timeout while the overlay is unchanged client-side.
+    // Leaflet has no soft-swap here: Dash TileLayer URL updates via set_props
+    // keep Global play moving (may flicker between frames).
+    if (activeEngine === "leaflet_legacy" || currentEngine() === "leaflet_legacy") {
+      if (
+        global.dash_clientside &&
+        typeof global.dash_clientside.set_props === "function"
+      ) {
+        var li;
+        for (li = 0; li < layers.length; li += 1) {
+          if (!layers[li] || !layers[li].tileUrl) {
+            continue;
+          }
+          global.dash_clientside.set_props(
+            { type: "cog-collections", index: li },
+            {
+              url: layers[li].tileUrl,
+              opacity:
+                layers[li].opacity == null ? 1 : layers[li].opacity,
+            }
+          );
+        }
+        setTilesReady(true);
+        schedulePrefetch(lastState);
+        return true;
+      }
+    }
+    // Unknown host: clear the play gate so ticks are not stuck waiting.
     setTilesReady(true);
     return false;
   }
@@ -836,16 +861,14 @@
     } else if (lastState.view && tms === "WebMercatorQuad") {
       view = lastState.view;
     }
-    // Keep the cache on the new tile matrix set so a scrub before Python
-    // confirms does not swap back to the previous projection's tiles.
-    var nextCogUrls = lastState.leadtimeCogUrls
-      ? Object.assign({}, lastState.leadtimeCogUrls, { tileMatrixSet: tms })
-      : lastState.leadtimeCogUrls;
+    // Clear forecasts until Python rebuilds for the new TMS / hemisphere.
+    // Rewriting TileMatrixSet on old URLs blanks polar ↔ global; keeping them
+    // requests the wrong grid. Basemap shows through the short wait.
     var next = Object.assign({}, lastState, {
       engine: engine,
       mode: mode,
-      layers: rewriteLayersTms(lastState.layers || [], tms),
-      leadtimeCogUrls: nextCogUrls,
+      layers: [],
+      leadtimeCogUrls: null,
       revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
     });
     if (view) {

@@ -999,7 +999,8 @@
     }
     var generation = (applyGeneration += 1);
     setBasemap(state.basemap, state.view && state.view.showBasemap);
-    syncLayers(state.layers);
+    // Soft-swap with hold so globe / TMS switches do not flash empty imagery.
+    syncLayers(state.layers, { smooth: true, holdUntilReady: true });
     viewer.resize();
     // ensureViewer may have run while the host was still hidden.
     if (wasHidden) {

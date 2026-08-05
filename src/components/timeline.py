@@ -214,6 +214,8 @@ timeline_bar = html.Div(
         ),
         dcc.Store(id="leadtime-playing", data=False),
         dcc.Store(id="leadtime-step-unit", data="day"),
+        # Ordered RFC3339 valid times for the active init (+ inferred step_unit).
+        dcc.Store(id="leadtime-axis", data=None),
         dcc.Store(id="leadtime-bounds", data={"min": 0, "max": 0}),
         dcc.Store(id="leadtime-keys-bound", data=False),
         # Debounced leadtime the browser asks Python to confirm once scrubbing

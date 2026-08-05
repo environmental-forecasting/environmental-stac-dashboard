@@ -3,6 +3,7 @@ import dash_bootstrap_components as dbc
 import dash_mantine_components as dmc
 from layouts import index
 from callbacks import legal, map_callbacks, place_search
+from tiler_proxy import register_tiler_proxy
 
 BAS_STYLE_KIT_VERSION = "0.7.3"
 TABLER_ICONS_VERSION = "3.34.1"
@@ -71,6 +72,7 @@ legal.register_callbacks(app)
 
 app.layout = index.layout
 server = app.server
+register_tiler_proxy(server)
 
 
 if __name__ == "__main__":

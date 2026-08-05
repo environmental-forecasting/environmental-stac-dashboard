@@ -7,6 +7,7 @@ from pystac_client import Client, ItemSearch
 from pystac_client.stac_api_io import StacApiIO
 from urllib3 import Retry
 
+from .leadtime_axis import leadtime_axis_payload, ordered_cog_assets
 from .timefmt import parse_stac_datetime, to_stac_datetime
 
 logger = logging.getLogger(__name__)
@@ -405,7 +406,18 @@ class STAC:
     def get_item_cogs(self, collection_id: str, forecast_reference_time: str):
         item = self.get_forecast_item(collection_id, forecast_reference_time)
         assets = item.get_assets(media_type=MediaType.COG, role="data")
-        return assets
+        # Ascending valid time so lead index matches the scrubber axis.
+        return {
+            key: asset
+            for _valid, key, asset in ordered_cog_assets(assets)
+        }
+
+    def get_leadtime_axis(
+        self, collection_id: str, forecast_reference_time: str
+    ) -> dict:
+        """Ordered valid times and inferred step unit for the lead scrubber."""
+        cogs = self.get_item_cogs(collection_id, forecast_reference_time)
+        return leadtime_axis_payload(cogs)
 
     def get_asset_band_props(
         self, collection_id: str, forecast_reference_time: str, asset_id

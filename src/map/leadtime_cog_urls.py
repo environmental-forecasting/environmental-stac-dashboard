@@ -15,6 +15,7 @@ def build_leadtime_cog_urls(
     rescale: tuple[float, float] | list[float] | None = None,
     band_index: int | None = None,
     reference_time: str | None = None,
+    bbox_by_collection: dict[str, list[float]] | None = None,
 ) -> dict[str, Any] | None:
     """
     Build the ``leadtimeCogUrls`` payload published on map-state.
@@ -31,17 +32,24 @@ def build_leadtime_cog_urls(
         rescale: Display range as ``(min, max)`` shared by every step.
         band_index: One-based band number (``bidx``).
         reference_time: Forecast init as a STAC datetime string.
+        bbox_by_collection: Optional WGS84 ``[west, south, east, north]`` per
+            collection so the map can clamp tile requests to the data footprint.
 
     Returns:
         Payload for map-state ``leadtimeCogUrls``, or None when no collection
         has usable hrefs.
     """
     collections: dict[str, Any] = {}
+    bboxes = bbox_by_collection or {}
     for collection_id, hrefs in (hrefs_by_collection or {}).items():
         usable = [href for href in (hrefs or []) if href]
         if not usable:
             continue
-        collections[collection_id] = {"hrefs": usable}
+        meta: dict[str, Any] = {"hrefs": usable}
+        bbox = bboxes.get(collection_id)
+        if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+            meta["bbox"] = [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])]
+        collections[collection_id] = meta
     if not collections or not tiler_base:
         return None
 
@@ -140,22 +148,24 @@ def layers_from_leadtime_cog_urls(
         asset_url = hrefs[lead]
         if not asset_url:
             continue
-        layers.append(
-            {
-                "id": collection_id,
-                "title": collection_id,
-                "tileUrl": build_xyz_tile_url(
-                    tiler_base=tiler_base,
-                    tile_matrix_set=tile_matrix_set,
-                    asset_url=asset_url,
-                    colormap=colormap,
-                    rescale=rescale_pair,
-                    band_index=band_index,
-                ),
-                "opacity": 1,
-                "visible": True,
-            }
-        )
+        entry: dict[str, Any] = {
+            "id": collection_id,
+            "title": collection_id,
+            "tileUrl": build_xyz_tile_url(
+                tiler_base=tiler_base,
+                tile_matrix_set=tile_matrix_set,
+                asset_url=asset_url,
+                colormap=colormap,
+                rescale=rescale_pair,
+                band_index=band_index,
+            ),
+            "opacity": 1,
+            "visible": True,
+        }
+        bbox = meta.get("bbox")
+        if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+            entry["bbox"] = [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])]
+        layers.append(entry)
     return layers
 
 

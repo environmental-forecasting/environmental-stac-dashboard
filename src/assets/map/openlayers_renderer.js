@@ -12,6 +12,9 @@
   // Leadtime / style swaps in flight: the incoming tiles paint above the
   // stable overlay so the previous step stays visible until they are ready.
   var pendingById = {};
+  // One parked overlay per collection id (previous lead/style). Adjacent
+  // step-back reuses it instead of refetching the same XYZ URL.
+  var previousById = {};
   var transitionGeneration = 0;
   var map = null;
   var basemapLayer = null;
@@ -59,13 +62,96 @@
     return source.getUrl && source.getUrl();
   }
 
+  /** COG path from a TiTiler XYZ template (`?url=`). */
+  function tileAssetKey(tileUrl) {
+    if (!tileUrl || typeof tileUrl !== "string") {
+      return "";
+    }
+    var match = /[?&]url=([^&]*)/.exec(tileUrl);
+    if (!match) {
+      return tileUrl;
+    }
+    try {
+      return decodeURIComponent(match[1]);
+    } catch (err) {
+      return match[1];
+    }
+  }
+
+  /** Colour / band query fingerprint; lead reuse must keep the same style. */
+  function tileStyleKey(tileUrl) {
+    if (!tileUrl || typeof tileUrl !== "string") {
+      return "";
+    }
+    var cmap = (/[?&]colormap_name=([^&]*)/.exec(tileUrl) || [])[1] || "";
+    var rescale = (/[?&]rescale=([^&]*)/.exec(tileUrl) || [])[1] || "";
+    var bidx = (/[?&]bidx=([^&]*)/.exec(tileUrl) || [])[1] || "";
+    return cmap + "\0" + rescale + "\0" + bidx;
+  }
+
+  /**
+   * True when two XYZ templates paint the same COG with the same style.
+   * Tolerates minor string differences (float formatting, key order) that
+   * would otherwise force a soft-swap refetch.
+   */
+  function urlsMatchForReuse(a, b) {
+    if (!a || !b) {
+      return false;
+    }
+    if (a === b) {
+      return true;
+    }
+    return (
+      tileAssetKey(a) === tileAssetKey(b) && tileStyleKey(a) === tileStyleKey(b)
+    );
+  }
+
+  function clearPrevious(layerId) {
+    var prev = previousById[layerId];
+    if (!prev) {
+      return;
+    }
+    if (map && prev.layer) {
+      map.removeLayer(prev.layer);
+    }
+    delete previousById[layerId];
+  }
+
+  function parkLayerAsPrevious(layerId, layer) {
+    if (!layer) {
+      return;
+    }
+    var prev = previousById[layerId];
+    if (prev && prev.layer && prev.layer !== layer) {
+      if (map) {
+        map.removeLayer(prev.layer);
+      }
+    }
+    // Hide completely so OpenLayers does not fetch tiles for the parked lead
+    // while panning (opacity 0 alone still loads). The XYZ source keeps its
+    // tile cache for an instant step-back promote.
+    layer.setOpacity(0);
+    layer.setVisible(false);
+    layer.setZIndex(1);
+    var url = layerSourceUrl(layer);
+    previousById[layerId] = {
+      layer: layer,
+      url: url,
+      assetKey: tileAssetKey(url),
+      styleKey: tileStyleKey(url),
+    };
+  }
+
   function refreshOverlaySources() {
     Object.keys(pendingById).forEach(cancelPending);
+    Object.keys(previousById).forEach(clearPrevious);
     Object.keys(forecastLayersById).forEach(function (layerId) {
       var layer = forecastLayersById[layerId];
       var url = layerSourceUrl(layer);
       if (url) {
-        layer.setSource(createXyzSource(url, currentTileGrid));
+        layer.setSource(
+          createXyzSource(url, currentTileGrid, layer.get("forecastBbox"))
+        );
       }
     });
   }
@@ -97,12 +183,43 @@
   }
 
   /**
+   * Instantly promote the parked previous overlay when it matches the target
+   * lead (same COG + style). Returns true when no new XYZ fetch is needed.
+   */
+  function tryPromotePrevious(layerId, layerDesc, index) {
+    var zIndex = 100 + index;
+    var targetUrl = layerDesc.tileUrl;
+    var targetOpacity = layerDesc.opacity == null ? 1 : layerDesc.opacity;
+    var prev = previousById[layerId];
+    if (!prev || !prev.layer || !urlsMatchForReuse(prev.url, targetUrl)) {
+      return false;
+    }
+    cancelPending(layerId);
+    var current = forecastLayersById[layerId];
+    // Detach the parked overlay from the slot before demoting current (so
+    // parkLayerAsPrevious does not destroy the layer we are promoting).
+    delete previousById[layerId];
+    if (current && current !== prev.layer) {
+      parkLayerAsPrevious(layerId, current);
+    }
+    applyLayerExtent(prev.layer, layerDesc);
+    prev.layer.setOpacity(targetOpacity);
+    prev.layer.setVisible(layerDesc.visible !== false);
+    prev.layer.setZIndex(zIndex);
+    forecastLayersById[layerId] = prev.layer;
+    return true;
+  }
+
+  /**
    * Stack a new XYZ source above the stable overlay and promote it once ready.
    *
    * The default is a progressive reveal: unloaded tiles are transparent so the
    * previous step shows through. For jumps (`holdUntilReady`) the incoming
    * layer stays invisible until its viewport tiles have loaded, then cuts over
    * in one go so the user never sees a patchwork of two steps.
+   *
+   * When the target URL is the parked previous lead, that overlay is promoted
+   * instead of refetching (pair reuse: current + previous only).
    */
   function beginSmoothSwap(layerId, layerDesc, index, options) {
     var holdUntilReady = !!(options && options.holdUntilReady);
@@ -110,25 +227,33 @@
     var targetUrl = layerDesc.tileUrl;
     var targetOpacity = layerDesc.opacity == null ? 1 : layerDesc.opacity;
     var existingPending = pendingById[layerId];
-    if (existingPending && layerSourceUrl(existingPending.layer) === targetUrl) {
+    if (
+      existingPending &&
+      urlsMatchForReuse(layerSourceUrl(existingPending.layer), targetUrl)
+    ) {
       existingPending.zIndex = zIndex;
       existingPending.holdUntilReady = holdUntilReady;
       if (!holdUntilReady) {
         existingPending.layer.setOpacity(targetOpacity);
       }
       existingPending.layer.setVisible(layerDesc.visible !== false);
+      applyLayerExtent(existingPending.layer, layerDesc);
+      return;
+    }
+    if (tryPromotePrevious(layerId, layerDesc, index)) {
       return;
     }
     cancelPending(layerId);
 
     var generation = (transitionGeneration += 1);
-    var source = createXyzSource(targetUrl, currentTileGrid);
+    var source = createXyzSource(targetUrl, currentTileGrid, layerDesc.bbox);
     var incoming = new ol.layer.Tile({
       source: source,
       opacity: holdUntilReady ? 0 : targetOpacity,
       visible: layerDesc.visible !== false,
       zIndex: zIndex + 50,
     });
+    applyLayerExtent(incoming, layerDesc);
 
     var entry = {
       layer: incoming,
@@ -175,7 +300,7 @@
       incoming.setOpacity(targetOpacity);
       var old = forecastLayersById[layerId];
       if (old && old !== incoming) {
-        map.removeLayer(old);
+        parkLayerAsPrevious(layerId, old);
       }
       incoming.setZIndex(zIndex);
       forecastLayersById[layerId] = incoming;
@@ -309,16 +434,116 @@
     });
   }
 
-  function createXyzSource(url, tileGrid) {
+  function createXyzSource(url, tileGrid, bbox) {
+    var wrapX = !tileGrid;
     var options = {
       url: url,
       crossOrigin: "anonymous",
+      // Global/WebMercator: wrap across ±180 so ice COGs can paint on both
+      // sides of the date line. Custom polar tile grids stay unwrapped.
+      wrapX: wrapX,
     };
     if (tileGrid) {
       options.tileGrid = tileGrid;
       options.projection = currentProjection;
+      options.wrapX = false;
     }
-    return new ol.source.XYZ(options);
+    var source = new ol.source.XYZ(options);
+    // Drop tiles outside the COG footprint (TiTiler outside-bounds 404s).
+    // Near-global footprints skip setExtent so wrap still works; filter here.
+    var extent = layerExtentFromBbox(bbox, { allowWorldWide: true });
+    if (!extent) {
+      return source;
+    }
+    var grid = source.getTileGrid();
+    var worldW = wrapX
+      ? ol.extent.getWidth(ol.proj.get("EPSG:3857").getExtent())
+      : 0;
+    var base = source.getTileUrlFunction();
+    source.setTileUrlFunction(function (coord, pixelRatio, projection) {
+      if (coord && grid) {
+        var te = grid.getTileCoordExtent(coord);
+        var hit = false;
+        var s;
+        for (s = -1; s <= 1; s += 1) {
+          if (
+            ol.extent.intersects(te, [
+              extent[0] + s * worldW,
+              extent[1],
+              extent[2] + s * worldW,
+              extent[3],
+            ])
+          ) {
+            hit = true;
+            break;
+          }
+        }
+        if (!hit) {
+          return undefined;
+        }
+      }
+      return base.call(this, coord, pixelRatio, projection);
+    });
+    return source;
+  }
+
+  /** WGS84 bbox → map extent. Near-global lon is null unless allowWorldWide. */
+  function layerExtentFromBbox(bbox, options) {
+    if (!bbox || bbox.length < 4 || typeof ol === "undefined" || !ol.proj) {
+      return undefined;
+    }
+    var allowWorldWide = !!(options && options.allowWorldWide);
+    var west = Number(bbox[0]);
+    var south = Number(bbox[1]);
+    var east = Number(bbox[2]);
+    var north = Number(bbox[3]);
+    if (
+      !isFinite(west) ||
+      !isFinite(south) ||
+      !isFinite(east) ||
+      !isFinite(north) ||
+      west >= east ||
+      south >= north
+    ) {
+      return undefined;
+    }
+    // Full-lon polar footprints: setExtent as wide as the world kills wrapX.
+    if (!allowWorldWide && east - west >= 350) {
+      return undefined;
+    }
+    var target = currentProjection || "EPSG:3857";
+    try {
+      var extent = ol.proj.transformExtent(
+        [west, south, east, north],
+        "EPSG:4326",
+        target
+      );
+      if (!extent || extent.length < 4 || !extent.every(isFinite)) {
+        return undefined;
+      }
+      if (!allowWorldWide) {
+        var world = worldExtentFor(target);
+        if (world && world[2] > world[0]) {
+          if ((extent[2] - extent[0]) / (world[2] - world[0]) > 0.85) {
+            return undefined;
+          }
+        }
+      }
+      return extent;
+    } catch (err) {
+      // Unknown projection / transform failure — leave uncapped.
+    }
+    return undefined;
+  }
+
+  function applyLayerExtent(tileLayer, layerDesc) {
+    if (!tileLayer || typeof tileLayer.setExtent !== "function") {
+      return;
+    }
+    tileLayer.set("forecastBbox", (layerDesc && layerDesc.bbox) || null);
+    tileLayer.setExtent(
+      layerExtentFromBbox(layerDesc && layerDesc.bbox) || undefined
+    );
   }
 
   function ensureMap() {
@@ -550,18 +775,20 @@
       existing = forecastLayersById[layer.id];
       if (!existing) {
         cancelPending(layer.id);
+        clearPrevious(layer.id);
         tileLayer = new ol.layer.Tile({
-          source: createXyzSource(layer.tileUrl, currentTileGrid),
+          source: createXyzSource(layer.tileUrl, currentTileGrid, layer.bbox),
           opacity: layer.opacity == null ? 1 : layer.opacity,
           visible: layer.visible !== false,
           zIndex: 100 + i,
         });
+        applyLayerExtent(tileLayer, layer);
         map.addLayer(tileLayer);
         forecastLayersById[layer.id] = tileLayer;
         continue;
       }
 
-      if (layerSourceUrl(existing) !== layer.tileUrl) {
+      if (!urlsMatchForReuse(layerSourceUrl(existing), layer.tileUrl)) {
         if (smooth) {
           beginSmoothSwap(layer.id, layer, i, {
             holdUntilReady: holdUntilReady,
@@ -569,14 +796,18 @@
           continue;
         }
         cancelPending(layer.id);
-        existing.setSource(createXyzSource(layer.tileUrl, currentTileGrid));
+        clearPrevious(layer.id);
+        existing.setSource(
+          createXyzSource(layer.tileUrl, currentTileGrid, layer.bbox)
+        );
       } else {
-        // The stable layer already shows this URL; drop any stale swap.
+        // The stable layer already shows this COG/style; drop any stale swap.
         cancelPending(layer.id);
       }
       existing.setOpacity(layer.opacity == null ? 1 : layer.opacity);
       existing.setVisible(layer.visible !== false);
       existing.setZIndex(100 + i);
+      applyLayerExtent(existing, layer);
     }
 
     Object.keys(forecastLayersById).forEach(function (layerId) {
@@ -584,6 +815,7 @@
         return;
       }
       cancelPending(layerId);
+      clearPrevious(layerId);
       map.removeLayer(forecastLayersById[layerId]);
       delete forecastLayersById[layerId];
     });
@@ -592,14 +824,16 @@
         cancelPending(layerId);
       }
     });
+    Object.keys(previousById).forEach(function (layerId) {
+      if (!nextIds[layerId]) {
+        clearPrevious(layerId);
+      }
+    });
   }
 
   /**
    * Warm tile URLs for the current viewport so the next step paints sooner.
-   *
-   * Capped so warming neighbouring leadtimes cannot flood TiTiler and starve
-   * the step the user is actually looking at. Viewport range is OL-specific;
-   * the Image() warm itself lives on ForecastMap.prefetchTileImages.
+   * Cap budget and clamp to each layer bbox so polar COGs do not 404-flood.
    */
   function prefetchLayers(layers, options) {
     if (!map || !layers || !layers.length || !mapHasSize()) {
@@ -630,28 +864,58 @@
         extent: ol.proj.get("EPSG:3857").getExtent(),
         maxZoom: 22,
       });
-    var range;
+    var viewExtent;
     try {
-      range = tileGrid.getTileRangeForExtentAndZ(
-        view.calculateExtent(map.getSize()),
-        z
-      );
+      viewExtent = view.calculateExtent(map.getSize());
     } catch (err) {
       return;
     }
-    if (!range) {
+    if (!viewExtent) {
       return;
     }
     var maxTiles =
       options && options.maxTiles != null ? Number(options.maxTiles) : 8;
-    global.ForecastMap.prefetchTileImages(layers, {
-      z: z,
-      minX: range.minX,
-      maxX: range.maxX,
-      minY: range.minY,
-      maxY: range.maxY,
-      maxTiles: maxTiles,
-    });
+    if (isNaN(maxTiles) || maxTiles < 1) {
+      maxTiles = 8;
+    }
+    var remaining = maxTiles;
+    var i;
+    for (i = 0; i < layers.length && remaining > 0; i += 1) {
+      var layer = layers[i];
+      if (!layer || !layer.tileUrl) {
+        continue;
+      }
+      var warmExtent = viewExtent;
+      var layerExtent = layerExtentFromBbox(layer.bbox, { allowWorldWide: true });
+      if (layerExtent) {
+        warmExtent = ol.extent.getIntersection(viewExtent, layerExtent);
+        if (!warmExtent || ol.extent.isEmpty(warmExtent)) {
+          continue;
+        }
+      }
+      var range;
+      try {
+        range = tileGrid.getTileRangeForExtentAndZ(warmExtent, z);
+      } catch (err) {
+        continue;
+      }
+      if (!range) {
+        continue;
+      }
+      var budget = remaining;
+      global.ForecastMap.prefetchTileImages([layer], {
+        z: z,
+        minX: range.minX,
+        maxX: range.maxX,
+        minY: range.minY,
+        maxY: range.maxY,
+        maxTiles: budget,
+      });
+      // Approximate spend: rows*cols capped by budget.
+      var cols = Math.max(0, range.maxX - range.minX + 1);
+      var rows = Math.max(0, range.maxY - range.minY + 1);
+      remaining -= Math.min(budget, cols * rows);
+    }
   }
 
   function setHostVisible(visible) {
@@ -774,7 +1038,8 @@
     applyView(state.view);
     setBasemap(state.basemap, state.view && state.view.showBasemap);
     // Hard swap on a projection change: the tile grid and CRS must rebuild.
-    syncLayers(state.layers, { smooth: false });
+    // Hold overlays until tiles load so polar ↔ global does not flash blank.
+    syncLayers(state.layers, { smooth: true, holdUntilReady: true });
     tryPendingFit();
     // Tiles requested at 0x0 stay cached for the same z/x/y after layout.
     // Flag that case and refresh once ResizeObserver (or a later apply) has size.

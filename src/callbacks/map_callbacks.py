@@ -61,9 +61,7 @@ from map import (
     resolve_mode_and_engine,
     resolve_engine_for_mode,
     rewrite_layer_entries_style,
-    rewrite_layer_entries_tms,
     rewrite_leadtime_cog_urls_style,
-    rewrite_leadtime_cog_urls_tms,
     tile_matrix_set_for_mode,
     to_tiler_asset_url,
     view_mode_and_hint,
@@ -216,7 +214,7 @@ def _build_forecast_layer_entries(
 
     Returns:
         List of layer dicts with ``id``, ``title``, ``tileUrl``, ``opacity``,
-        and ``visible``.
+        ``visible``, and optional WGS84 ``bbox``.
     """
     layers: list[dict] = []
     for collection_id in collection_ids or []:
@@ -251,19 +249,65 @@ def _build_forecast_layer_entries(
             )
             logging.debug("tile_url: %s", tile_url)
 
-            layers.append(
-                {
-                    "id": collection_id,
-                    "title": collection_id,
-                    "tileUrl": tile_url,
-                    "opacity": 1,
-                    "visible": True,
-                }
+            entry = {
+                "id": collection_id,
+                "title": collection_id,
+                "tileUrl": tile_url,
+                "opacity": 1,
+                "visible": True,
+            }
+            bbox = _forecast_bbox_wgs84(
+                stac, collection_id, forecast_reference_time_str
             )
+            if bbox:
+                entry["bbox"] = bbox
+            layers.append(entry)
         except Exception as e:
             logging.error("Error processing collection %s: %s", collection_id, e)
             continue
     return layers
+
+
+def _forecast_bbox_wgs84(
+    stac: STAC,
+    collection_id: str,
+    forecast_reference_time_str: str,
+) -> list[float] | None:
+    """
+    WGS84 ``[west, south, east, north]`` for clamping overlay tile requests.
+
+    Prefers the forecast Item bbox (matches the COG footprint); falls back to
+    the collection spatial extent. Skips antimeridian-spanning boxes.
+    """
+    bbox = None
+    try:
+        _temporal, item_bbox = stac.get_item_extents(
+            collection_id, forecast_reference_time_str
+        )
+        bbox = item_bbox
+    except Exception:
+        bbox = None
+    if bbox is None or len(bbox) < 4:
+        try:
+            _temporal, spatial = stac.get_collection_extents(collection_id)
+            bbox = spatial
+        except Exception:
+            return None
+    try:
+        west, south, east, north = (
+            float(bbox[0]),
+            float(bbox[1]),
+            float(bbox[2]),
+            float(bbox[3]),
+        )
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not all(map(lambda v: v == v and abs(v) != float("inf"), (west, south, east, north))):
+        return None
+    # OpenLayers transformExtent needs a simple west<east box.
+    if west >= east or south >= north:
+        return None
+    return [west, south, east, north]
 
 
 def _build_leadtime_cog_urls(
@@ -298,6 +342,7 @@ def _build_leadtime_cog_urls(
         Payload for map-state, or None when no collection has COG assets.
     """
     hrefs_by_collection: dict[str, list[str]] = {}
+    bbox_by_collection: dict[str, list[float]] = {}
     for collection_id in collection_ids or []:
         try:
             if not _collection_fits_view_mode(stac, collection_id, view_mode):
@@ -309,6 +354,11 @@ def _build_leadtime_cog_urls(
                 )
                 for asset in cogs.values()
             ]
+            bbox = _forecast_bbox_wgs84(
+                stac, collection_id, forecast_reference_time_str
+            )
+            if bbox:
+                bbox_by_collection[collection_id] = bbox
         except Exception as e:
             logging.error(
                 "Error collecting leadtime COG URLs for %s: %s", collection_id, e
@@ -323,6 +373,7 @@ def _build_leadtime_cog_urls(
         rescale=(min_val, max_val),
         band_index=band_index,
         reference_time=forecast_reference_time_str,
+        bbox_by_collection=bbox_by_collection or None,
     )
 
 
@@ -1297,6 +1348,54 @@ def register_callbacks(app: dash.Dash):
         return options, value_out, "forecast-busy", "Updating map…", request_out
 
     @app.callback(
+        Output("leadtime-axis", "data"),
+        Input("forecast-init-date-picker", "value"),
+        Input("collections-dropdown", "value"),
+        prevent_initial_call=True,
+    )
+    def update_leadtime_axis(selected_date: str, collection_ids: list):
+        """
+        Load ordered COG valid times for the scrubber from STAC.
+
+        Uses the shortest axis when several collections are selected so lead
+        indices stay in range for every overlay.
+        """
+        if not selected_date or not collection_ids:
+            return None
+
+        if isinstance(collection_ids, str):
+            collection_ids = [collection_ids]
+
+        stac = _get_stac_client()
+        forecast_reference_time_str = date_picker_to_reference_time(selected_date)
+        axes: list[dict] = []
+        for collection_id in collection_ids:
+            try:
+                axis = stac.get_leadtime_axis(
+                    collection_id, forecast_reference_time_str
+                )
+            except Exception as e:
+                logging.warning(
+                    "Could not load leadtime axis for %s: %s", collection_id, e
+                )
+                continue
+            times = axis.get("times") or []
+            if times:
+                axes.append(axis)
+
+        if not axes:
+            return None
+
+        # Prefer the shortest shared lead count so every collection can paint.
+        chosen = min(axes, key=lambda axis: len(axis["times"]))
+        logging.info(
+            "Leadtime axis: %s steps, step_unit=%s",
+            len(chosen["times"]),
+            chosen.get("step_unit"),
+        )
+        return chosen
+
+    @app.callback(
         Output("time-slider-div", "className"),
         Output("selected-time", "children"),
         Output("leadtime-step-subtitle", "children"),
@@ -1312,8 +1411,8 @@ def register_callbacks(app: dash.Dash):
         Input("forecast-init-date-picker", "value"),
         Input("leadtime-slider", "value"),
         Input("controls-open", "data"),
+        Input("leadtime-axis", "data"),
         State("forecast-dates-store", "data"),
-        State("leadtime-step-unit", "data"),
         prevent_initial_call=True,
     )
     def update_leadtime_slider(
@@ -1321,22 +1420,27 @@ def register_callbacks(app: dash.Dash):
         selected_date: str,
         leadtime: int,
         controls_open,
+        leadtime_axis: dict,
         forecast_dates: dict,
-        step_unit: str,
     ):
         """
-        selected_date: Calendar day 'YYYY-MM-DD'.
-        forecast_dates: Dict of calendar day -> forecast end calendar day.
+        Drive the scrubber from STAC COG valid times (``leadtime-axis``).
+
+        ``forecast-dates-store`` only gates whether an init is selected; lead
+        count and spacing come from ordered asset valid times.
         """
         idle = "forecast-timeline forecast-chrome forecast-timeline--idle"
         active = "forecast-timeline forecast-chrome"
-        step_unit = step_unit or "day"
         triggered = callback_context.triggered_id
+
+        axis_times = (leadtime_axis or {}).get("times") or []
+        step_unit = (leadtime_axis or {}).get("step_unit") or "day"
 
         if (
             not forecast_dates
             or not selected_date
             or selected_date not in forecast_dates
+            or not axis_times
         ):
             return (
                 idle,
@@ -1352,20 +1456,9 @@ def register_callbacks(app: dash.Dash):
                 True,
             )
 
-        forecast_start_date = parse_calendar_day(selected_date)
-        forecast_end_date = parse_calendar_day(forecast_dates[selected_date])
-
-        logging.info("forecast start date: %s", forecast_start_date)
-        logging.info("forecast end date: %s", forecast_end_date)
-
-        # leadtime_length end day is init+N; indices are 0..N-1.
-        num_days = (forecast_end_date - forecast_start_date).days
-        if num_days < 1:
-            num_days = 1
-
         leadtime_min = 0
-        leadtime_max = num_days - 1
-        leadtimes = list(range(num_days))
+        leadtime_max = len(axis_times) - 1
+        leadtimes = list(range(len(axis_times)))
 
         # Mark density tracks the map face, not the full window (sidebar
         # push layout deducts the open controls column below the drawer bp).
@@ -1373,18 +1466,20 @@ def register_callbacks(app: dash.Dash):
         desired_marks = max(2, width // 100)
         step = max(1, math.ceil(len(leadtimes) / desired_marks))
 
-        marks = [
-            {
-                "value": idx,
-                "label": format_slider_label(
-                    forecast_start_date + timedelta(days=idx),
-                    step_unit=step_unit,
-                ),
-            }
-            for idx in leadtimes[::step]
-        ]
+        marks = []
+        for idx in leadtimes[::step]:
+            try:
+                valid_dt = parse_stac_datetime(axis_times[idx])
+            except (TypeError, ValueError):
+                continue
+            marks.append(
+                {
+                    "value": idx,
+                    "label": format_slider_label(valid_dt, step_unit=step_unit),
+                }
+            )
 
-        if triggered == "forecast-init-date-picker":
+        if triggered == "forecast-init-date-picker" or triggered == "leadtime-axis":
             next_value = 0
             pause = True
             value_out = next_value
@@ -1402,10 +1497,11 @@ def register_callbacks(app: dash.Dash):
             pause = False
             value_out = no_update if next_value == current else next_value
 
-        valid = format_valid_time(
-            forecast_start_date + timedelta(days=next_value),
-            step_unit=step_unit,
-        )
+        try:
+            valid_dt = parse_stac_datetime(axis_times[next_value])
+            valid = format_valid_time(valid_dt, step_unit=step_unit)
+        except (TypeError, ValueError, IndexError):
+            valid = "Invalid leadtime"
         subtitle = step_unit_subtitle(step_unit)
         bounds = {"min": leadtime_min, "max": leadtime_max}
 
@@ -1422,6 +1518,23 @@ def register_callbacks(app: dash.Dash):
                 step_unit,
                 False,
                 True,
+            )
+        # Slider ticks (play/scrub): only refresh the valid-time label. Rewriting
+        # marks/min/max every Interval step re-renders the scrubber and fights
+        # the soft-swap, which looks like tile flicker.
+        if triggered == "leadtime-slider":
+            return (
+                active,
+                valid,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                value_out,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
             )
         return (
             active,
@@ -1794,25 +1907,10 @@ def register_callbacks(app: dash.Dash):
                 next_style["domain_max"] = max(dmax, float(max_val))
             return next_style
 
-        # TMS / view-mode switch: rewrite TileMatrixSet on existing URLs.
-        # Skip STAC walks, extent filtering, and TiTiler statistics so the
-        # control feels instant (client already applied an optimistic state).
+        # TMS / view-mode switch: rebuild overlays for the new TileMatrixSet and
+        # hemisphere filter. Rewriting only the TMS id leaves unfit collections
+        # cached and blanks polar ↔ global / globe switches.
         if tms_only:
-            previous_layers = (map_state or {}).get("layers") or []
-            rewritten = rewrite_layer_entries_tms(
-                previous_layers, tile_matrix_set
-            )
-            if rewritten is not None:
-                return _publish(
-                    rewritten,
-                    no_update,
-                    leadtime_cog_urls=rewrite_leadtime_cog_urls_tms(
-                        (map_state or {}).get("leadtimeCogUrls"), tile_matrix_set
-                    ),
-                )
-            # No reusable overlays yet (e.g. prefs just set the mode): fall
-            # through to the full catalogue rebuild below instead of publishing
-            # an empty layer list.
             if "vmin" in style and "vmax" in style:
                 layer_entries = _layers_for_scale(style["vmin"], style["vmax"])
                 if layer_entries:
@@ -1823,7 +1921,7 @@ def register_callbacks(app: dash.Dash):
                             style["vmin"], style["vmax"]
                         ),
                     )
-
+            # No reusable style yet — fall through to the full catalogue rebuild.
         # Colour map only, unlocked: reuse the current range from display-style.
         if colormap_only and not locked:
             layer_entries = _layers_for_scale(style["vmin"], style["vmax"])
