@@ -55,3 +55,14 @@ median_t_slider_to_ready_ms= 393 median_t_first_cog_tile_ms= 426 burst= 0/11
 
 Defaults: collection `icenet_0.2_north`, init date `2026-06-19`, leads 0-10, 3 repeats. Compare runs with `--compare baseline` after changes.
 
+## Documentation
+
+Docs can be built with:
+
+```bash
+make docs-install
+make docs
+```
+
+Related: [environmental-stac-orchestrator](https://github.com/environmental-forecasting/environmental-stac-orchestrator), [environmental-stac-generator](https://github.com/environmental-forecasting/environmental-stac-generator).
+

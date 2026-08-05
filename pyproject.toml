@@ -1,0 +1,15 @@
+[project]
+name = "environmental-stac-dashboard"
+version = "0.0.0"
+description = "Environmental forecast dashboard"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+docs = [
+    "zensical",
+]
+
+[tool.uv]
+package = false
