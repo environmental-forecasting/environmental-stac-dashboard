@@ -45,11 +45,6 @@ def ordered_cog_assets(cogs: dict[str, Asset]) -> list[tuple[datetime, str, Asse
     return rows
 
 
-def ordered_cog_asset_list(cogs: dict[str, Asset]) -> list[Asset]:
-    """COG assets in ascending valid-time order (for lead index paint)."""
-    return [asset for _t, _k, asset in ordered_cog_assets(cogs)]
-
-
 def infer_step_unit(valid_times: list[datetime]) -> str:
     """
     Map median lead spacing to a UI step unit for labels/subtitle.

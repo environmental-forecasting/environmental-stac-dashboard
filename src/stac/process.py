@@ -12,6 +12,32 @@ from .timefmt import parse_stac_datetime, to_stac_datetime
 
 logger = logging.getLogger(__name__)
 
+
+class _InternalStacApiIO(StacApiIO):
+    """Rewrite public ``/api`` hrefs to the in-network STAC root.
+
+    Staging/prod advertise ``.../api/...`` in STAC links (for Traefik), while
+    uvicorn still serves routes at ``/``. Strip the prefix for container-to-
+    container calls from the dashboard.
+    """
+
+    def __init__(self, base_url: str, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._base = base_url.rstrip("/")
+        self._public_api = f"{self._base}/api"
+
+    def _to_internal(self, href: str) -> str:
+        if href == self._public_api or href == f"{self._public_api}/":
+            return f"{self._base}/"
+        if href.startswith(f"{self._public_api}/"):
+            return f"{self._base}/{href[len(self._public_api) + 1 :]}"
+        return href
+
+    def read_text(self, source, *args, **kwargs):
+        if isinstance(source, str):
+            source = self._to_internal(source)
+        return super().read_text(source, *args, **kwargs)
+
 # Slim Item Search field set for building the forecast date picker.
 # Drop geometry and assets so listing many inits stays cheap.
 _FORECAST_INIT_FIELDS = {
@@ -74,7 +100,7 @@ class STAC:
             status_forcelist=[502, 503, 504],
             allowed_methods=None,
         )
-        stac_api_io = StacApiIO(max_retries=retry)
+        stac_api_io = _InternalStacApiIO(STAC_FASTAPI_URL, max_retries=retry)
         self._url = STAC_FASTAPI_URL
         self._catalog = Client.open(STAC_FASTAPI_URL, stac_io=stac_api_io)
         # Cache full Items by (collection_id, forecast:reference_time).
@@ -143,11 +169,6 @@ class STAC:
         collection = self._catalog.get_collection(collection_id)
         self._collection_cache[collection_id] = collection
         return collection
-
-    def get_collection_items(self, collection_id, resolve: bool = False):
-        collection = self._get_collection(collection_id)
-        items = collection.get_items()
-        return tuple(items) if resolve else items
 
     def get_collection_extents(self, collection_id):
         collection = self._get_collection(collection_id)
@@ -327,10 +348,6 @@ class STAC:
                 continue
         return None
 
-    def get_collection_forecast_init_dates(self, collection_id) -> list[dt]:
-        """Return sorted forecast init datetimes (slim Item Search under the hood)."""
-        return [row["datetime"] for row in self.list_forecast_inits(collection_id)]
-
     def get_forecast_item(
         self, collection_id: str, forecast_reference_time: str
     ) -> Item:
@@ -369,25 +386,6 @@ class STAC:
             if bands:
                 self._bands_cache[cache_key] = bands
         return item
-
-    def get_item(self, collection_id: str, forecast_reference_time: str) -> Item:
-        """Load a forecast Item (cached). Prefer ``get_forecast_item`` in new code."""
-        return self.get_forecast_item(collection_id, forecast_reference_time)
-
-    def clear_item_cache(self) -> None:
-        """Clear cached catalogue data used by the map and variable dropdown."""
-        self._item_cache.clear()
-        self._bands_cache.clear()
-        self._forecast_inits_cache.clear()
-        self._collection_cache.clear()
-
-    def get_item_properties(self, collection_id: str, forecast_reference_time: str):
-        item = self.get_forecast_item(collection_id, forecast_reference_time)
-        return item.properties
-
-    def get_item_leadtime(self, collection_id: str, forecast_reference_time: str) -> str:
-        properties = self.get_item_properties(collection_id, forecast_reference_time)
-        return properties["forecast:leadtime_length"]
 
     def get_item_extents(self, collection_id: str, forecast_reference_time: str):
         item = self.get_forecast_item(collection_id, forecast_reference_time)
