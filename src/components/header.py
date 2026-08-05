@@ -29,7 +29,16 @@ header_layout = html.Div(
         dbc.DropdownMenu(
             nav=False,
             align_end=True,
-            label="Part of British Antarctic Survey",
+            label=html.Span(
+                [
+                    html.Span(
+                        "Part of British Antarctic Survey",
+                        className="forecast-header__bas-full",
+                    ),
+                    html.Span("BAS", className="forecast-header__bas-short"),
+                ],
+                className="forecast-header__bas-label",
+            ),
             toggle_style={
                 "border": 0,
                 "padding": "0.25rem 0.5rem",

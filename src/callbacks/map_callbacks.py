@@ -78,6 +78,29 @@ from .display_style import (
 from .utils import get_cog_band_statistics, round_2dp
 
 _BUSY_HIDDEN = "forecast-busy is-hidden"
+# Match --bp-drawer / --layout-* in forecast_map.css (media queries cannot
+# read custom properties, so keep the pixel values mirrored here).
+_DRAWER_BREAKPOINT_PX = 900
+_CONTROLS_COLUMN_PX = 320
+_CONTROLS_SEAM_PX = 22
+_ULTRAWIDE_CONTROLS_PX = 360
+_ULTRAWIDE_BREAKPOINT_PX = 1600
+
+
+def _map_face_width(window_width: int | None, controls_open: bool | None) -> int:
+    """Approximate the map column width for leadtime mark density."""
+    width = int(window_width or 1200)
+    if width <= _DRAWER_BREAKPOINT_PX:
+        # Overlay drawer: map is full-bleed.
+        return max(320, width)
+    if not controls_open:
+        return max(320, width)
+    controls = (
+        _ULTRAWIDE_CONTROLS_PX
+        if width >= _ULTRAWIDE_BREAKPOINT_PX
+        else _CONTROLS_COLUMN_PX
+    )
+    return max(320, width - controls - _CONTROLS_SEAM_PX)
 
 
 @lru_cache(maxsize=1)
@@ -397,6 +420,40 @@ def register_callbacks(app: dash.Dash):
         """,
         Output("window-width", "data"),
         Input("page-load-trigger", "data"),
+    )
+
+    # Overlay-drawer breakpoint (≤900): auto-collapse controls when entering
+    # drawer mode or on first load if already narrow. Do not auto-open when
+    # widening — leave the user's toggle choice alone.
+    app.clientside_callback(
+        """
+        function(width, isOpen) {
+            var nu = window.dash_clientside.no_update;
+            var bp = 900;
+            var nowWide = (width == null ? window.innerWidth : Number(width)) > bp;
+            var wasWide = window.__controlsLayoutWide;
+            window.__controlsLayoutWide = nowWide;
+            if (nowWide) {
+                return [nu, nu, nu];
+            }
+            // First paint on a narrow viewport, or crossing down through bp.
+            var enteringDrawer = wasWide === undefined || wasWide === true;
+            if (!enteringDrawer || !isOpen) {
+                return [nu, nu, nu];
+            }
+            return [
+                "forecast-controls-column forecast-controls-column--collapsed",
+                false,
+                "tabler:chevron-left",
+            ];
+        }
+        """,
+        Output("controls-column", "className", allow_duplicate=True),
+        Output("controls-open", "data", allow_duplicate=True),
+        Output("controls-seam-icon", "icon", allow_duplicate=True),
+        Input("window-width", "data"),
+        State("controls-open", "data"),
+        prevent_initial_call=True,
     )
 
     # Push map-state into the OpenLayers / Leaflet bridge.
@@ -1254,6 +1311,7 @@ def register_callbacks(app: dash.Dash):
         Input("window-width", "data"),
         Input("forecast-init-date-picker", "value"),
         Input("leadtime-slider", "value"),
+        Input("controls-open", "data"),
         State("forecast-dates-store", "data"),
         State("leadtime-step-unit", "data"),
         prevent_initial_call=True,
@@ -1262,6 +1320,7 @@ def register_callbacks(app: dash.Dash):
         window_width,
         selected_date: str,
         leadtime: int,
+        controls_open,
         forecast_dates: dict,
         step_unit: str,
     ):
@@ -1308,7 +1367,9 @@ def register_callbacks(app: dash.Dash):
         leadtime_max = num_days - 1
         leadtimes = list(range(num_days))
 
-        width = int(window_width or 1200)
+        # Mark density tracks the map face, not the full window (sidebar
+        # push layout deducts the open controls column below the drawer bp).
+        width = _map_face_width(window_width, controls_open)
         desired_marks = max(2, width // 100)
         step = max(1, math.ceil(len(leadtimes) / desired_marks))
 
@@ -1335,10 +1396,11 @@ def register_callbacks(app: dash.Dash):
             # pause-on-scrub and cancels playback after each Interval tick.
             value_out = no_update if next_value == current else next_value
         else:
+            # window-width / controls-open: refresh marks only unless clamped.
             current = 0 if leadtime is None else int(leadtime)
             next_value = max(leadtime_min, min(current, leadtime_max))
             pause = False
-            value_out = next_value
+            value_out = no_update if next_value == current else next_value
 
         valid = format_valid_time(
             forecast_start_date + timedelta(days=next_value),
@@ -1972,7 +2034,7 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_call=True,
     )
     def toggle_main_controller(_seam, is_open):
-        """Toggle the right-hand controls column without covering the map."""
+        """Toggle forecast controls (push column on desktop, overlay drawer ≤900px)."""
         opened = not bool(is_open)
         base = "forecast-controls-column"
         class_name = base if opened else f"{base} forecast-controls-column--collapsed"

@@ -1,5 +1,14 @@
 /* Leadtime scrubber uses Mantine Slider; legacy rc-slider rules removed. */
 
+.forecast-timeline .mantine-Slider-root {
+  /* Mark labels sit below the track and must not be clipped. */
+  overflow: visible;
+}
+
+.forecast-timeline .mantine-Slider-trackContainer {
+  overflow: visible;
+}
+
 .forecast-timeline .mantine-Slider-track::before {
   background: rgba(255, 255, 255, 0.12);
 }
@@ -16,4 +25,17 @@
 .forecast-timeline .mantine-Slider-markLabel {
   color: #8b96ab;
   font-size: 10px;
+  white-space: nowrap;
+  /* Keep early/late labels inside the map face. */
+  transform: translate(-50%, 0);
+}
+
+.forecast-timeline .mantine-Slider-markWrapper:first-of-type .mantine-Slider-markLabel {
+  transform: translate(0, 0);
+  text-align: left;
+}
+
+.forecast-timeline .mantine-Slider-markWrapper:last-of-type .mantine-Slider-markLabel {
+  transform: translate(-100%, 0);
+  text-align: right;
 }

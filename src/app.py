@@ -32,6 +32,14 @@ app = dash.Dash(
     __name__,
     external_stylesheets=[*stylesheets],
     external_scripts=external_scripts,
+    meta_tags=[
+        {
+            "name": "viewport",
+            "content": (
+                "width=device-width, initial-scale=1, viewport-fit=cover"
+            ),
+        }
+    ],
 )
 app.title = "IceNet Visualiser"
 

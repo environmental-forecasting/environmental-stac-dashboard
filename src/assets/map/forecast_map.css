@@ -1,6 +1,10 @@
 /* App shell: compact header/footer, map column + controls column.
    Shared chrome fills header / sidebar / timeline / footer as one frame.
-   Shell gradient: black to very dark blue. */
+   Shell gradient: black to very dark blue.
+
+   Layout tokens (breakpoints are repeated in @media — custom properties
+   cannot drive media-query conditions):
+     drawer overlay ≤900px, timeline stack ≤1100px, ultrawide ≥1600px */
 .app-shell {
   --shell-top: #000000;
   --shell-bottom: #001435;
@@ -17,7 +21,13 @@
   --chrome-action-bg-hover: rgba(255, 255, 255, 0.14);
   --chrome-action-fg: #e8ecf4;
   --chrome-action-radius: 8px;
+  --layout-controls: 320px;
+  --layout-seam: 22px;
+  /* Row + scrubber track + reserved space for Mantine mark labels. */
+  --layout-timeline: 112px;
+  --layout-cbar-max: 480px;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -39,6 +49,15 @@
 
 .app-shell__header {
   flex: 0 0 auto;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+.app-shell__footer {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 .forecast-header {
@@ -49,6 +68,10 @@
   min-height: 2.5rem;
   padding: 0.35rem 1rem;
   width: 100%;
+}
+
+.forecast-header__bas-short {
+  display: none;
 }
 
 .forecast-header__brand {
@@ -696,9 +719,9 @@
   bottom: 3.5rem;
 }
 
-/* Controls column + seam. */
+/* Controls column + seam (desktop/tablet push layout). */
 .forecast-controls-seam {
-  flex: 0 0 22px;
+  flex: 0 0 var(--layout-seam);
   align-self: stretch;
   display: flex;
   align-items: center;
@@ -719,14 +742,14 @@
 }
 
 .forecast-controls-column {
-  flex: 0 0 320px;
-  width: 320px;
-  min-width: 320px;
-  max-width: 320px;
+  flex: 0 0 var(--layout-controls);
+  width: var(--layout-controls);
+  min-width: var(--layout-controls);
+  max-width: var(--layout-controls);
   min-height: 0;
   overflow: hidden;
   transition: flex-basis 0.2s ease, width 0.2s ease, min-width 0.2s ease,
-    max-width 0.2s ease, opacity 0.2s ease;
+    max-width 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
   opacity: 1;
 }
 
@@ -741,10 +764,11 @@
 
 .forecast-controls-panel {
   box-sizing: border-box;
-  width: 320px;
+  width: 100%;
   height: 100%;
   overflow: auto;
   padding: 12px 14px 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
   border-radius: 0;
   border: none;
   box-shadow: none;
@@ -826,11 +850,11 @@
 
 /* Fixed-height timeline below the map - joins seam/sidebar/footer. */
 .forecast-timeline {
-  flex: 0 0 96px;
-  height: 96px;
-  max-height: 96px;
+  flex: 0 0 var(--layout-timeline);
+  height: var(--layout-timeline);
+  max-height: var(--layout-timeline);
   box-sizing: border-box;
-  padding: 8px 14px 10px;
+  padding: 8px 14px 4px;
   border-radius: 0;
   border: none;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
@@ -839,6 +863,7 @@
   flex-direction: column;
   gap: 6px;
   z-index: 3;
+  overflow: visible;
 }
 
 .forecast-timeline--idle .forecast-timeline__scrubber,
@@ -917,6 +942,10 @@
 .forecast-timeline__scrubber {
   flex: 1 1 auto;
   margin: 0 4px;
+  /* Mantine mark labels are absolutely positioned below the track, so they
+     do not grow the scrubber box unless we reserve this space. */
+  padding-bottom: 1.35rem;
+  overflow: visible;
 }
 
 .forecast-cbar-block {
@@ -933,10 +962,11 @@
   display: flex;
   flex-direction: row;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
   width: 100%;
-  max-width: 480px;
+  max-width: var(--layout-cbar-max);
   padding: 5px 8px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.22);
@@ -1212,29 +1242,46 @@
   font-weight: 400 !important;
 }
 
-/* Narrow viewports: keep flex push layout; only tighten chrome. */
-@media (max-width: 720px) {
-  .forecast-header {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    gap: 0.4rem;
-    padding: 0.45rem 0.75rem;
+/* Ultrawide: give the controls a little more room and let the colourbar grow. */
+@media (min-width: 1600px) {
+  .app-shell {
+    --layout-controls: min(360px, 22vw);
+    --layout-cbar-max: min(640px, 100%);
+  }
+}
+
+/* Timeline stacks earlier than the drawer breakpoint so mid-width laptops
+   do not crush labels | transport | colourbar into one row.
+
+   Phone / portrait tablet: allow the shell to scroll so the scrubber mark
+   labels and the site footer stay reachable under a taller stacked chrome. */
+@media (max-width: 1100px) {
+  .app-shell {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
-  .forecast-header__brand,
-  .forecast-header__bas {
-    justify-self: center;
+  .app-shell__main {
+    flex: 1 0 auto;
+    min-height: 55dvh;
+    overflow: visible;
   }
 
-  .forecast-header__view-mode {
-    max-width: 100%;
-    border-radius: 8px;
+  .forecast-map-column {
+    min-height: 55dvh;
+  }
+
+  .forecast-map-column__map {
+    min-height: 40dvh;
   }
 
   .forecast-timeline {
-    flex-basis: auto;
+    flex: 0 0 auto;
     height: auto;
     max-height: none;
+    overflow: visible;
+    padding-bottom: 0.35rem;
   }
 
   .forecast-timeline__row {
@@ -1248,10 +1295,204 @@
     justify-self: center;
   }
 
-  .forecast-controls-column:not(.forecast-controls-column--collapsed) {
-    flex-basis: min(320px, 85vw);
-    width: min(320px, 85vw);
+  .forecast-cbar-block {
+    width: 100%;
+  }
+
+  .forecast-cbar--inline {
+    max-width: 100%;
+  }
+
+  .forecast-cbar__ramp-wrap,
+  .forecast-cbar__ramp {
+    min-width: 80px;
+  }
+
+  .forecast-timeline__scrubber {
+    margin: 2px 2px 0;
+    padding-bottom: 1.55rem;
+  }
+
+  .app-shell__footer {
+    flex: 0 0 auto;
+  }
+
+  /* Keep map zoom widgets above a taller stacked timeline. */
+  #forecast-map-ol .ol-zoom {
+    bottom: 1rem;
+  }
+
+  #forecast-map-leaflet .leaflet-top.leaflet-left {
+    bottom: 4.5rem;
+  }
+
+  #forecast-map-globe .cesium-viewer-toolbar {
+    bottom: 16px;
+  }
+}
+
+/* Map-first overlay drawer: controls float over a full-bleed map. */
+@media (max-width: 900px) {
+  .forecast-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand bas"
+      "view view";
+    gap: 0.4rem 0.75rem;
+    padding: 0.45rem 0.75rem;
+  }
+
+  .forecast-header__brand {
+    grid-area: brand;
+    justify-self: start;
+    font-size: 1.05rem;
+  }
+
+  .forecast-header__bas {
+    grid-area: bas;
+    justify-self: end;
+  }
+
+  .forecast-header__bas-full {
+    display: none;
+  }
+
+  .forecast-header__bas-short {
+    display: inline;
+  }
+
+  .forecast-header__view-mode {
+    grid-area: view;
+    justify-self: stretch;
+    max-width: 100%;
+    border-radius: 8px;
+  }
+
+  .forecast-map-view-mode label,
+  .forecast-map-view-mode .dash-options-list-option {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  .forecast-map-column {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  /* Soft dim when the drawer is open (decorative; seam still toggles). */
+  .app-shell__main:has(
+      .forecast-controls-column:not(.forecast-controls-column--collapsed)
+    )::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 18;
+    background: rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+  }
+
+  .forecast-controls-seam {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    z-index: 25;
+    flex: none;
+    width: 28px;
+    height: 3rem;
+    align-self: auto;
+    border-radius: 8px 0 0 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-right: none;
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.25);
+  }
+
+  .app-shell__main:has(
+      .forecast-controls-column:not(.forecast-controls-column--collapsed)
+    )
+    .forecast-controls-seam {
+    right: min(var(--layout-controls), 85vw);
+  }
+
+  .forecast-controls-column {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    flex: none;
+    width: min(var(--layout-controls), 85vw);
     min-width: min(280px, 85vw);
-    max-width: min(320px, 85vw);
+    max-width: min(var(--layout-controls), 85vw);
+    box-shadow: -8px 0 28px rgba(0, 0, 0, 0.4);
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .forecast-controls-column--collapsed {
+    transform: translateX(100%);
+    opacity: 0;
+    pointer-events: none;
+    /* Keep width so the slide-out distance matches the open drawer. */
+    width: min(var(--layout-controls), 85vw);
+    min-width: min(280px, 85vw);
+    max-width: min(var(--layout-controls), 85vw);
+  }
+
+  .forecast-map-search-shell {
+    top: max(0.75rem, env(safe-area-inset-top, 0px));
+    left: max(0.75rem, env(safe-area-inset-left, 0px));
+    width: min(21.5rem, calc(100% - 5.5rem));
+  }
+
+  .forecast-map-north-up {
+    top: max(0.75rem, env(safe-area-inset-top, 0px));
+    right: max(0.75rem, env(safe-area-inset-right, 0px));
+  }
+
+  .forecast-busy {
+    top: max(0.75rem, env(safe-area-inset-top, 0px));
+    max-width: calc(100% - 2rem);
+  }
+
+  .forecast-timeline__btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .forecast-timeline__btn--play {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+/* Very narrow phones: tighter chrome. */
+@media (max-width: 480px) {
+  .forecast-header {
+    padding: 0.35rem 0.55rem;
+  }
+
+  .forecast-timeline {
+    padding: 6px 10px 10px;
+  }
+
+  .forecast-timeline__scrubber {
+    padding-bottom: 1.7rem;
+  }
+
+  .forecast-timeline .mantine-Slider-markLabel {
+    font-size: 9px;
+  }
+
+  .forecast-cbar__value,
+  .forecast-cbar__value.dash-input,
+  .forecast-cbar--inline .dash-input-container {
+    width: 42px;
+    min-width: 36px;
+  }
+
+  .forecast-map-search-shell {
+    width: min(21.5rem, calc(100% - 4rem));
   }
 }
