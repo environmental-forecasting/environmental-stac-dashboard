@@ -1,9 +1,22 @@
+import os
+
 import dash
 import dash_bootstrap_components as dbc
 import dash_mantine_components as dmc
 from layouts import index
 from callbacks import legal, map_callbacks, place_search
 from tiler_proxy import register_tiler_proxy
+
+
+def _url_base_pathname() -> str:
+    """Path prefix when mounted behind a reverse proxy (e.g. ``/dashboard/``)."""
+    raw = (os.environ.get("DASHBOARD_URL_BASE_PATHNAME") or "/").strip() or "/"
+    if not raw.startswith("/"):
+        raw = f"/{raw}"
+    if raw != "/" and not raw.endswith("/"):
+        raw = f"{raw}/"
+    return raw
+
 
 BAS_STYLE_KIT_VERSION = "0.7.3"
 TABLER_ICONS_VERSION = "3.34.1"
@@ -33,6 +46,7 @@ app = dash.Dash(
     __name__,
     external_stylesheets=[*stylesheets],
     external_scripts=external_scripts,
+    url_base_pathname=_url_base_pathname(),
     meta_tags=[
         {
             "name": "viewport",

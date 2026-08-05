@@ -1,10 +1,8 @@
 import logging
 import math
-import os
 import time
 from datetime import datetime, timedelta
 from functools import lru_cache
-from urllib.parse import urlparse, urlunparse
 
 import dash
 import dash_leaflet as dl
@@ -25,7 +23,6 @@ from stac.timefmt import (
     date_picker_to_reference_time,
     format_slider_label,
     format_valid_time,
-    parse_calendar_day,
     parse_stac_datetime,
     step_unit_subtitle,
     to_calendar_day,
@@ -106,50 +103,6 @@ def _get_stac_client() -> STAC:
     """Return a cached STAC client singleton to avoid re-creating
     HTTP connections on every callback invocation."""
     return STAC(STAC_FASTAPI_URL)
-
-
-def normalise_url_path(url: str) -> str:
-    """
-    Normalise the path part of a URL by resolving `.` and `..`.
-
-    Args:
-        url: The original URL.
-
-    Returns:
-        The normalised URL.
-    """
-    parts = urlparse(url)
-    normalised_path = os.path.normpath(parts.path)
-
-    # Preserve trailing slash if it was present in the original URL
-    if parts.path.endswith("/") and not normalised_path.endswith("/"):
-        normalised_path += "/"
-
-    # Rebuild and return the normalised URL
-    return urlunparse(parts._replace(path=normalised_path))
-
-
-# Function to generate tile URL for a STAC Item
-def get_tile_url(cog_path: str, tile_matrix_set: str = WEB_MERCATOR_QUAD) -> str:
-    """
-    Return the XYZ tile URL template for a COG asset href.
-
-    Args:
-        cog_path: Public STAC asset href for the COG. Rewritten for TiTiler fetch.
-        tile_matrix_set: TiTiler tile matrix set id. Defaults to Web Mercator.
-
-    Returns:
-        TiTiler XYZ template URL with ``{z}``, ``{x}``, and ``{y}`` placeholders.
-    """
-    # Browser hits TILER_URL; TiTiler itself fetches `url=`, so that must be
-    # reachable from the titiler container (file-server Docker DNS).
-    return build_cog_tile_url(
-        cog_path,
-        tiler_url=TILER_URL,
-        file_server_url=FILE_SERVER_URL,
-        file_server_internal_url=FILE_SERVER_INTERNAL_URL,
-        tile_matrix_set=tile_matrix_set,
-    )
 
 
 def _end_calendar_day_from_init(row: dict) -> str | None:
@@ -409,31 +362,6 @@ def _build_leaflet_overlays(layer_entries: list[dict]) -> list:
             )
         )
     return tile_layers
-
-
-def _build_tile_layers(
-    stac: STAC,
-    collection_ids: list,
-    forecast_reference_time_str: str,
-    leadtime: int,
-    band_index: int,
-    colormap: str,
-    min_val: float,
-    max_val: float,
-) -> list:
-    """Build Leaflet overlays for each selected collection at the given leadtime."""
-    # Kept as a thin wrapper for call sites that still expect Overlay children.
-    entries = _build_forecast_layer_entries(
-        stac,
-        collection_ids,
-        forecast_reference_time_str,
-        leadtime,
-        band_index,
-        colormap,
-        min_val,
-        max_val,
-    )
-    return _build_leaflet_overlays(entries)
 
 
 # Callback function that will update the output container based on input

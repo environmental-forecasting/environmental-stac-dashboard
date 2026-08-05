@@ -21,22 +21,7 @@
     );
   }
 
-  function getSliderBounds() {
-    var slider = document.getElementById("leadtime-slider");
-    if (!slider) {
-      return { min: 0, max: 0 };
-    }
-    // Mantine slider bounds are reflected on the Dash component props via DOM dataset when present.
-    var minAttr = slider.getAttribute("data-min");
-    var maxAttr = slider.getAttribute("data-max");
-    return {
-      min: minAttr != null ? Number(minAttr) : 0,
-      max: maxAttr != null ? Number(maxAttr) : 0,
-    };
-  }
-
   global.ForecastTimelineKeys = {
     isEditableTarget: isEditableTarget,
-    getSliderBounds: getSliderBounds,
   };
 })(window);

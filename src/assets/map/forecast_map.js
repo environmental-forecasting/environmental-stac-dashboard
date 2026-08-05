@@ -215,27 +215,6 @@
     return "WebMercatorQuad";
   }
 
-  function rewriteLayersTms(layers, tileMatrixSet) {
-    if (!layers || !layers.length || !tileMatrixSet) {
-      return layers || [];
-    }
-    var out = [];
-    var i;
-    for (i = 0; i < layers.length; i += 1) {
-      var layer = layers[i];
-      if (!layer || typeof layer.tileUrl !== "string") {
-        out.push(layer);
-        continue;
-      }
-      var nextUrl = layer.tileUrl.replace(
-        /(\/cog\/tiles\/)([^/]+)(\/)/,
-        "$1" + tileMatrixSet + "$3"
-      );
-      out.push(Object.assign({}, layer, { tileUrl: nextUrl }));
-    }
-    return out;
-  }
-
   function projectionOf(state) {
     return (state && state.view && state.view.projection) || "";
   }
@@ -818,31 +797,11 @@
   }
 
   /**
-   * Switch map host immediately using the last known layers/view.
-   *
-   * Used when the user changes view mode so the UI does not wait on the
-   * Python ``update_cog_layer`` round-trip (keeps playback speed responsive).
-   */
-  function applyEngine(engine) {
-    if (!engine || !lastState) {
-      return;
-    }
-    if (engine === (lastState.engine || "openlayers")) {
-      return;
-    }
-    applyState(
-      Object.assign({}, lastState, {
-        engine: engine,
-        revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
-      })
-    );
-  }
-
-  /**
-   * Apply a view-mode change immediately (engine + TMS rewrite + view preset).
+   * Apply a view-mode change immediately (engine + view preset).
    *
    * ``presets`` is ``{ mode: viewHint }`` from the Dash store, including polar
-   * tile-grid hints so Arctic/Antarctic do not wait on Python.
+   * tile-grid hints so Arctic/Antarctic do not wait on Python. Overlay layers
+   * are cleared until Python rebuilds URLs for the new TMS.
    */
   function applyViewMode(mode, presets) {
     if (!mode || !lastState) {
@@ -1914,7 +1873,6 @@
 
   global.ForecastMap = {
     applyState: applyState,
-    applyEngine: applyEngine,
     applyViewMode: applyViewMode,
     applyLeadtimeIndex: applyLeadtimeIndex,
     layersFromLeadtimeCogUrls: layersFromLeadtimeCogUrls,
