@@ -23,8 +23,8 @@
   --chrome-action-radius: 8px;
   --layout-controls: 320px;
   --layout-seam: 22px;
-  /* Row + scrubber track + reserved space for Mantine mark labels. */
-  --layout-timeline: 112px;
+  /* Row + scrubber; date labels hang below the track inside scrubber padding. */
+  --layout-timeline: 118px;
   --layout-cbar-max: 480px;
   height: 100vh;
   height: 100dvh;
@@ -1017,11 +1017,12 @@
 }
 
 .forecast-timeline__scrubber {
-  flex: 1 1 auto;
-  margin: 0 4px;
-  /* Mantine mark labels are absolutely positioned below the track, so they
-     do not grow the scrubber box unless we reserve this space. */
-  padding-bottom: 1.35rem;
+  /* Do not flex-grow: spare timeline height was opening a gap above the
+     date labels instead of between the track and the ticks. */
+  flex: 0 0 auto;
+  margin: 0 8px;
+  /* Room for absolutely positioned markLabels under the track. */
+  padding-bottom: 2.05rem;
   overflow: visible;
 }
 
@@ -1387,7 +1388,7 @@
 
   .forecast-timeline__scrubber {
     margin: 2px 2px 0;
-    padding-bottom: 1.55rem;
+    padding-bottom: 2.05rem;
   }
 
   .app-shell__footer {
@@ -1555,7 +1556,7 @@
   }
 
   .forecast-timeline__scrubber {
-    padding-bottom: 1.7rem;
+    padding-bottom: 2.15rem;
   }
 
   .forecast-timeline .mantine-Slider-markLabel {

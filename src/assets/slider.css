@@ -3,9 +3,14 @@
 .forecast-timeline .mantine-Slider-root {
   /* Mark labels sit below the track and must not be clipped. */
   overflow: visible;
+  box-sizing: border-box;
+  /* Inset the track so a centred first/last date still fits inside the
+     timeline instead of hanging past the left/right edge. */
+  padding-inline: 1.35rem;
 }
 
-.forecast-timeline .mantine-Slider-trackContainer {
+.forecast-timeline .mantine-Slider-trackContainer,
+.forecast-timeline .mantine-Slider-track {
   overflow: visible;
 }
 
@@ -20,22 +25,23 @@
 .forecast-timeline .mantine-Slider-thumb {
   border: 2px solid #3d7ab5;
   background: #0f131c;
+  z-index: 2;
+}
+
+.forecast-timeline .mantine-Slider-markWrapper {
+  /* Wrappers are zero-height anchors on the track; labels position from here. */
+  overflow: visible;
 }
 
 .forecast-timeline .mantine-Slider-markLabel {
   color: #8b96ab;
   font-size: 10px;
   white-space: nowrap;
-  /* Keep early/late labels inside the map face. */
+  /* Mantine leaves markLabel position:static, so top/transform never clear
+     the thumb. Anchor under the mark instead. */
+  position: absolute !important;
+  left: 50%;
+  top: calc(var(--slider-thumb-size, 1.125rem) / 2 + 0.65rem) !important;
   transform: translate(-50%, 0);
-}
-
-.forecast-timeline .mantine-Slider-markWrapper:first-of-type .mantine-Slider-markLabel {
-  transform: translate(0, 0);
-  text-align: left;
-}
-
-.forecast-timeline .mantine-Slider-markWrapper:last-of-type .mantine-Slider-markLabel {
-  transform: translate(-100%, 0);
-  text-align: right;
+  pointer-events: none;
 }
