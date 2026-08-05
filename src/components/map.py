@@ -118,6 +118,21 @@ leaflet_map = html.Div(
                                 html.Div(
                                     [
                                         html.Button(
+                                            DashIconify(
+                                                icon="tabler:polygon",
+                                                width=16,
+                                                height=16,
+                                            ),
+                                            id="map-region-upload",
+                                            n_clicks=0,
+                                            type="button",
+                                            className="forecast-map-search__region",
+                                            title="Upload GeoJSON region",
+                                            **{
+                                                "aria-label": "Upload GeoJSON region"
+                                            },
+                                        ),
+                                        html.Button(
                                             id="map-search-clear",
                                             n_clicks=0,
                                             type="button",
@@ -219,5 +234,7 @@ leaflet_map = html.Div(
         dcc.Store(id="map-view-presets", data={}),
         dcc.Store(id="map-bridge-tick", data=0),
         dcc.Store(id="map-goto", data=None),
+        # Lightweight region meta only (never the full GeoJSON).
+        dcc.Store(id="map-region-meta", data=None),
     ],
 )

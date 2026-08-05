@@ -359,14 +359,20 @@ def register_callbacks(app: dash.Dash):
 
     app.clientside_callback(
         """
-        function(value) {
-            return (value || "").trim()
-                ? "forecast-map-search__field has-query"
-                : "forecast-map-search__field";
+        function(value, regionMeta) {
+            var classes = ["forecast-map-search__field"];
+            if ((value || "").trim()) {
+                classes.push("has-query");
+            }
+            if (regionMeta) {
+                classes.push("has-region");
+            }
+            return classes.join(" ");
         }
         """,
         Output("map-search-field", "className"),
         Input("map-search-query", "value"),
+        Input("map-region-meta", "data"),
     )
 
     # Fly the active map host and draw the outline highlight.

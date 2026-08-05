@@ -1186,6 +1186,452 @@
     return { ok: true };
   }
 
+  function applyFlyToSideEffects(result) {
+    if (!result || result.skipped) {
+      return result;
+    }
+    if (result.ok === false) {
+      publishPlaceStatus(result);
+      return result;
+    }
+    var leaf = result.leaflet;
+    if (
+      leaf &&
+      global.dash_clientside &&
+      typeof global.dash_clientside.set_props === "function"
+    ) {
+      if (leaf.viewport != null) {
+        global.dash_clientside.set_props("map", { viewport: leaf.viewport });
+      }
+      if (leaf.data !== undefined) {
+        global.dash_clientside.set_props("map-search-highlight", {
+          data: leaf.data,
+        });
+      }
+    }
+    return result;
+  }
+
+  var REGION_MAX_BYTES = 5 * 1024 * 1024;
+  var REGION_SOFT_VERTICES = 20000;
+  var REGION_HARD_VERTICES = 50000;
+  var REGION_WORKER_BYTES = 1024 * 1024;
+  var REGION_SIMPLIFY_TOLERANCES = [
+    0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05,
+  ];
+
+  function setRegionStatus(message, kind) {
+    if (
+      !global.dash_clientside ||
+      typeof global.dash_clientside.set_props !== "function"
+    ) {
+      return;
+    }
+    var className = "forecast-map-search__status";
+    if (kind === "warning") {
+      className += " is-warning";
+    } else if (kind === "info") {
+      className += " is-info";
+    }
+    global.dash_clientside.set_props("map-search-status", {
+      children: message || "",
+      className: className,
+    });
+  }
+
+  function setRegionMeta(meta) {
+    if (
+      !global.dash_clientside ||
+      typeof global.dash_clientside.set_props !== "function"
+    ) {
+      return;
+    }
+    global.dash_clientside.set_props("map-region-meta", { data: meta || null });
+  }
+
+  function scanCoords(geojson) {
+    var count = 0;
+    var minX = Infinity;
+    var minY = Infinity;
+    var maxX = -Infinity;
+    var maxY = -Infinity;
+    var projected = false;
+
+    function visit(coord) {
+      var x = Number(coord[0]);
+      var y = Number(coord[1]);
+      if (!isFinite(x) || !isFinite(y)) {
+        return;
+      }
+      count += 1;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+      if (Math.abs(x) > 180.0001 || Math.abs(y) > 90.0001) {
+        projected = true;
+      }
+    }
+
+    function walk(node) {
+      if (!node) {
+        return;
+      }
+      if (Array.isArray(node)) {
+        if (
+          node.length >= 2 &&
+          typeof node[0] === "number" &&
+          typeof node[1] === "number"
+        ) {
+          visit(node);
+          return;
+        }
+        for (var i = 0; i < node.length; i += 1) {
+          walk(node[i]);
+        }
+        return;
+      }
+      if (node.type === "Feature") {
+        walk(node.geometry);
+        return;
+      }
+      if (node.type === "FeatureCollection") {
+        var features = node.features || [];
+        for (var f = 0; f < features.length; f += 1) {
+          walk(features[f]);
+        }
+        return;
+      }
+      if (node.coordinates) {
+        walk(node.coordinates);
+      } else if (node.geometries) {
+        for (var g = 0; g < node.geometries.length; g += 1) {
+          walk(node.geometries[g]);
+        }
+      }
+    }
+
+    walk(geojson);
+    return {
+      count: count,
+      projected: projected,
+      bbox: count
+        ? [minX, minY, maxX, maxY]
+        : null,
+    };
+  }
+
+  function geometryIsDrawable(geometry) {
+    if (!geometry || !geometry.type) {
+      return false;
+    }
+    return (
+      geometry.type === "Polygon" ||
+      geometry.type === "MultiPolygon" ||
+      geometry.type === "LineString" ||
+      geometry.type === "MultiLineString" ||
+      geometry.type === "GeometryCollection"
+    );
+  }
+
+  function filterDrawableGeojson(geojson) {
+    if (!geojson || !geojson.type) {
+      return null;
+    }
+    if (geojson.type === "Feature") {
+      if (!geometryIsDrawable(geojson.geometry)) {
+        return null;
+      }
+      return geojson;
+    }
+    if (geojson.type === "FeatureCollection") {
+      var kept = [];
+      var features = geojson.features || [];
+      for (var i = 0; i < features.length; i += 1) {
+        var feature = features[i];
+        if (
+          feature &&
+          feature.type === "Feature" &&
+          geometryIsDrawable(feature.geometry)
+        ) {
+          kept.push(feature);
+        } else if (geometryIsDrawable(feature)) {
+          kept.push({
+            type: "Feature",
+            properties: {},
+            geometry: feature,
+          });
+        }
+      }
+      if (!kept.length) {
+        return null;
+      }
+      return { type: "FeatureCollection", features: kept };
+    }
+    if (!geometryIsDrawable(geojson)) {
+      return null;
+    }
+    return {
+      type: "Feature",
+      properties: {},
+      geometry: geojson,
+    };
+  }
+
+  // OL is loaded via CDN for every map mode; use it to simplify for Leaflet / Cesium / OL alike.
+  function requireOlSimplify() {
+    if (
+      typeof ol === "undefined" ||
+      !ol.format ||
+      typeof ol.format.GeoJSON !== "function"
+    ) {
+      throw new Error("OpenLayers failed to load; cannot simplify GeoJSON regions");
+    }
+  }
+
+  function simplifyGeojsonWithOl(geojson, tolerance) {
+    requireOlSimplify();
+    var fmt = new ol.format.GeoJSON();
+    var features = fmt.readFeatures(geojson, {
+      dataProjection: "EPSG:4326",
+      featureProjection: "EPSG:4326",
+    });
+    if (!features || !features.length) {
+      return geojson;
+    }
+    for (var i = 0; i < features.length; i += 1) {
+      var geom = features[i].getGeometry();
+      if (!geom || typeof geom.simplify !== "function") {
+        throw new Error("OpenLayers geometry.simplify is unavailable");
+      }
+      features[i].setGeometry(geom.simplify(tolerance));
+    }
+    return fmt.writeFeaturesObject(features, {
+      dataProjection: "EPSG:4326",
+      featureProjection: "EPSG:4326",
+    });
+  }
+
+  function autoSimplifyGeojson(geojson) {
+    var count = scanCoords(geojson).count;
+    if (count <= REGION_SOFT_VERTICES) {
+      return { geojson: geojson, simplified: false, vertexCount: count };
+    }
+    requireOlSimplify();
+    var current = geojson;
+    for (var i = 0; i < REGION_SIMPLIFY_TOLERANCES.length; i += 1) {
+      current = simplifyGeojsonWithOl(geojson, REGION_SIMPLIFY_TOLERANCES[i]);
+      count = scanCoords(current).count;
+      if (count <= REGION_SOFT_VERTICES) {
+        return { geojson: current, simplified: true, vertexCount: count };
+      }
+    }
+    return { geojson: current, simplified: true, vertexCount: count };
+  }
+
+  function parseJsonText(text, useWorker) {
+    if (!useWorker || typeof Worker === "undefined") {
+      return Promise.resolve(JSON.parse(text));
+    }
+    return new Promise(function (resolve, reject) {
+      var blob = new Blob(
+        [
+          "self.onmessage=function(e){try{self.postMessage({ok:1,data:JSON.parse(e.data)});}catch(err){self.postMessage({ok:0,message:String(err&&err.message||err)});}};",
+        ],
+        { type: "application/javascript" }
+      );
+      var url = URL.createObjectURL(blob);
+      var worker = new Worker(url);
+      worker.onmessage = function (event) {
+        URL.revokeObjectURL(url);
+        worker.terminate();
+        if (event.data && event.data.ok) {
+          resolve(event.data.data);
+        } else {
+          reject(
+            new Error(
+              (event.data && event.data.message) || "Invalid GeoJSON"
+            )
+          );
+        }
+      };
+      worker.onerror = function (err) {
+        URL.revokeObjectURL(url);
+        worker.terminate();
+        reject(err);
+      };
+      worker.postMessage(text);
+    });
+  }
+
+  function zoomFromBbox(bbox) {
+    var span = Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1], 1e-6);
+    var zoom = Math.log2(360 / span);
+    if (!isFinite(zoom)) {
+      return 8;
+    }
+    return Math.max(1, Math.min(14, Math.floor(zoom)));
+  }
+
+  function applyUploadedRegion(geojson, fileName) {
+    try {
+      requireOlSimplify();
+    } catch (err) {
+      setRegionStatus(
+        (err && err.message) || "OpenLayers is required to display this region",
+        "warning"
+      );
+      return;
+    }
+    var drawable = filterDrawableGeojson(geojson);
+    if (!drawable) {
+      setRegionStatus(
+        "GeoJSON must include Polygon or LineString geometry",
+        "warning"
+      );
+      return;
+    }
+    var scan = scanCoords(drawable);
+    if (scan.projected) {
+      setRegionStatus(
+        "Coordinates look projected; export as WGS84 (EPSG:4326) lon/lat",
+        "warning"
+      );
+      return;
+    }
+    var prepared;
+    try {
+      prepared = autoSimplifyGeojson(drawable);
+    } catch (err) {
+      setRegionStatus(
+        (err && err.message) || "OpenLayers is required to display this region",
+        "warning"
+      );
+      return;
+    }
+    if (prepared.vertexCount > REGION_HARD_VERTICES) {
+      setRegionStatus(
+        "Region too complex even after simplify; simplify offline then retry",
+        "warning"
+      );
+      return;
+    }
+    var bbox = scanCoords(prepared.geojson).bbox;
+    if (!bbox) {
+      setRegionStatus("Could not read coordinates from GeoJSON", "warning");
+      return;
+    }
+    var lon = (bbox[0] + bbox[2]) / 2;
+    var lat = (bbox[1] + bbox[3]) / 2;
+    var goto = {
+      lon: lon,
+      lat: lat,
+      zoom: zoomFromBbox(bbox),
+      bbox: bbox,
+      geojson: prepared.geojson,
+      ts: Date.now(),
+    };
+    var result = applyFlyToSideEffects(flyTo(goto));
+    if (result && result.ok === false) {
+      return;
+    }
+    setRegionMeta({
+      name: fileName || null,
+      bbox: bbox,
+      vertexCount: prepared.vertexCount,
+      simplified: !!prepared.simplified,
+      ts: Date.now(),
+    });
+    if (prepared.simplified) {
+      setRegionStatus("Region simplified for display", "info");
+    } else {
+      setRegionStatus("", null);
+    }
+  }
+
+  function handleRegionFile(file) {
+    if (!file) {
+      return;
+    }
+    if (file.size > REGION_MAX_BYTES) {
+      setRegionStatus(
+        "File too large (max 5 MB); simplify or crop offline then retry",
+        "warning"
+      );
+      return;
+    }
+    var reader = new FileReader();
+    reader.onerror = function () {
+      setRegionStatus("Could not read file", "warning");
+    };
+    reader.onload = function () {
+      var text = reader.result;
+      if (typeof text !== "string") {
+        setRegionStatus("Could not read file", "warning");
+        return;
+      }
+      parseJsonText(text, file.size >= REGION_WORKER_BYTES)
+        .then(function (parsed) {
+          applyUploadedRegion(parsed, file.name);
+        })
+        .catch(function () {
+          setRegionStatus("Invalid GeoJSON", "warning");
+        });
+    };
+    reader.readAsText(file);
+  }
+
+  function ensureRegionFileInput() {
+    var input = document.getElementById("map-region-file");
+    if (input) {
+      return input;
+    }
+    // dash.html has no Input component; inject a local file picker in the DOM.
+    var actions = document.querySelector(".forecast-map-search__actions");
+    if (!actions) {
+      return null;
+    }
+    input = document.createElement("input");
+    input.id = "map-region-file";
+    input.type = "file";
+    input.accept = ".geojson,.json,application/geo+json,application/json";
+    input.className = "forecast-map-search__region-input";
+    input.setAttribute("aria-hidden", "true");
+    input.tabIndex = -1;
+    actions.appendChild(input);
+    return input;
+  }
+
+  function ensureRegionUpload() {
+    if (global.__forecastRegionUploadBound) {
+      return;
+    }
+    global.__forecastRegionUploadBound = true;
+    document.addEventListener("click", function (event) {
+      var btn =
+        event.target && event.target.closest
+          ? event.target.closest("#map-region-upload")
+          : null;
+      if (!btn) {
+        return;
+      }
+      event.preventDefault();
+      var input = ensureRegionFileInput();
+      if (input) {
+        input.click();
+      }
+    });
+    document.addEventListener("change", function (event) {
+      var input = event.target;
+      if (!input || input.id !== "map-region-file") {
+        return;
+      }
+      var file = input.files && input.files[0];
+      handleRegionFile(file);
+      input.value = "";
+    });
+  }
+
   function clearPlace() {
     lastPlaceGoto = null;
     if (
@@ -1201,6 +1647,7 @@
       global.ForecastMapCesium.clearLastPlace();
     }
     publishPlaceStatus({ ok: true });
+    setRegionMeta(null);
     if (
       global.dash_clientside &&
       typeof global.dash_clientside.set_props === "function"
@@ -1440,6 +1887,7 @@
 
   ensureMapSearchKeys();
   ensureViewModeResetClick();
+  ensureRegionUpload();
 
   global.ForecastMap = {
     applyState: applyState,
@@ -1456,6 +1904,7 @@
     clearBusy: clearBusy,
     flyTo: flyTo,
     clearPlace: clearPlace,
+    handleRegionFile: handleRegionFile,
     setNorthUpClickEnabled: setNorthUpClickEnabled,
     setNorthUpLockEnabled: setNorthUpLockEnabled,
     clearNorthUpSelection: clearNorthUpSelection,
