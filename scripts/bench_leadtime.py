@@ -245,10 +245,10 @@ def _compare(current: dict, baseline_path: Path) -> None:
             continue
         delta = a - b
         pct = (delta / b * 100.0) if b else 0.0
-        print(f"  {key}: {b:.0f} -> {a:.0f} ms ({delta:+.0f}, {pct:+.0f}%)")
+        print(f"  {key}: {b:.0f} to {a:.0f} ms ({delta:+.0f}, {pct:+.0f}%)")
     print(
         "  burst_frames_with_tile:",
-        f"{base.get('burst_frames_with_tile')} -> {cur.get('burst_frames_with_tile')}",
+        f"{base.get('burst_frames_with_tile')} to {cur.get('burst_frames_with_tile')}",
     )
 
 

@@ -622,7 +622,7 @@
       projectionOf(previous) === projectionOf(state);
 
     // Same projection/engine: only swap overlay URLs (preserve camera / zoom).
-    // Basemap still needs applying — a style toggle bumps revision with
+    // Basemap still needs applying - a style toggle bumps revision with
     // identical overlay URLs and used to early-return before setBasemap.
     if (
       sameCamera &&
@@ -821,7 +821,7 @@
       view = lastState.view;
     }
     // Clear forecasts until Python rebuilds for the new TMS / hemisphere.
-    // Rewriting TileMatrixSet on old URLs blanks polar ↔ global; keeping them
+    // Rewriting TileMatrixSet on old URLs blanks polar to global; keeping them
     // requests the wrong grid. Basemap shows through the short wait.
     var next = Object.assign({}, lastState, {
       engine: engine,

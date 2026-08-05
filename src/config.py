@@ -2,9 +2,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 import logging
 
 class Settings(BaseSettings):
-    stac_fastapi_url: str = "http://localhost:8000"
-    # Browser-facing TiTiler base URL (host port / Traefik path).
-    tiler_url: str = "http://localhost:8002"
+    stac_fastapi_url: str = "http://localhost/api"
+    # Browser-facing TiTiler base URL (Traefik path).
+    tiler_url: str = "http://localhost/tiles"
     # Server-side TiTiler base URL (Docker DNS). Falls back to tiler_url.
     tiler_internal_url: str | None = None
     # Public file-server prefix used in STAC asset hrefs.

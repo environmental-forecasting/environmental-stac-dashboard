@@ -2,7 +2,7 @@
    Shared chrome fills header / sidebar / timeline / footer as one frame.
    Shell gradient: black to very dark blue.
 
-   Layout tokens (breakpoints are repeated in @media — custom properties
+   Layout tokens (breakpoints are repeated in @media - custom properties
    cannot drive media-query conditions):
      drawer overlay ≤900px, timeline stack ≤1100px, ultrawide ≥1600px */
 .app-shell {
@@ -900,7 +900,7 @@
   letter-spacing: 0.02em;
 }
 
-/* Field captions only — do not style dropdown option <label>s (checkbox + text). */
+/* Field captions only - do not style dropdown option <label>s (checkbox + text). */
 .forecast-controls-panel > label {
   display: block;
   margin-top: 10px;

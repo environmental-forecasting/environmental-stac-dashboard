@@ -53,7 +53,7 @@ _WEB_MERCATOR_MODES = frozenset(
 
 def normalise_view_mode(mode: str | None) -> str:
     """
-    Normalise a view-mode id (empty -> global).
+    Normalise a view-mode id (empty defaults to global).
 
     Args:
         mode: Raw mode string from the UI or store.

@@ -487,7 +487,7 @@
     return source;
   }
 
-  /** WGS84 bbox → map extent. Near-global lon is null unless allowWorldWide. */
+  /** WGS84 bbox to map extent. Near-global lon is null unless allowWorldWide. */
   function layerExtentFromBbox(bbox, options) {
     if (!bbox || bbox.length < 4 || typeof ol === "undefined" || !ol.proj) {
       return undefined;
@@ -531,7 +531,7 @@
       }
       return extent;
     } catch (err) {
-      // Unknown projection / transform failure — leave uncapped.
+      // Unknown projection / transform failure - leave uncapped.
     }
     return undefined;
   }
@@ -701,7 +701,7 @@
       : null;
 
     var previousTileGrid = currentTileGrid;
-    // Always assign (including null) so polar -> Global clears the custom grid.
+    // Always assign (including null) so polar to Global clears the custom grid.
     currentTileGrid = tileGrid;
     var gridChanged = previousTileGrid !== currentTileGrid;
 
@@ -1038,7 +1038,7 @@
     applyView(state.view);
     setBasemap(state.basemap, state.view && state.view.showBasemap);
     // Hard swap on a projection change: the tile grid and CRS must rebuild.
-    // Hold overlays until tiles load so polar ↔ global does not flash blank.
+    // Hold overlays until tiles load so polar to global does not flash blank.
     syncLayers(state.layers, { smooth: true, holdUntilReady: true });
     tryPendingFit();
     // Tiles requested at 0x0 stay cached for the same z/x/y after layout.

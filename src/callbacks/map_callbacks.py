@@ -403,7 +403,7 @@ def register_callbacks(app: dash.Dash):
 
     # Overlay-drawer breakpoint (≤900): auto-collapse controls when entering
     # drawer mode or on first load if already narrow. Do not auto-open when
-    # widening — leave the user's toggle choice alone.
+    # widening - leave the user's toggle choice alone.
     app.clientside_callback(
         """
         function(width, isOpen) {
@@ -1079,7 +1079,7 @@ def register_callbacks(app: dash.Dash):
 
         stac = _get_stac_client()
         all_forecast_dates: set[datetime] = set()
-        # Calendar day YYYY-MM-DD -> forecast end calendar day YYYY-MM-DD
+        # Calendar day YYYY-MM-DD to forecast end calendar day YYYY-MM-DD
         forecast_dates_dict: dict[str, str] = {}
 
         for collection_id in collection_ids:
@@ -1543,7 +1543,7 @@ def register_callbacks(app: dash.Dash):
             # Prefer the live dropdown / display-style over a stale request.
             # Locked colormap edits skip this publisher, so prev.colormap can
             # still be blues_r while play soft-swaps the user's ramp from the
-            # rewritten leadtimeCogUrls cache — and Pause would snap back.
+            # rewritten leadtimeCogUrls cache - and Pause would snap back.
             style_cmap = normalise_display_style(display_style).get("colormap")
             return build_map_request(
                 prev,
@@ -1837,7 +1837,7 @@ def register_callbacks(app: dash.Dash):
 
         # TMS / view-mode switch: rebuild overlays for the new TileMatrixSet and
         # hemisphere filter. Rewriting only the TMS id leaves unfit collections
-        # cached and blanks polar ↔ global / globe switches.
+        # cached and blanks polar to global / globe switches.
         if tms_only:
             if "vmin" in style and "vmax" in style:
                 layer_entries = _layers_for_scale(style["vmin"], style["vmax"])
@@ -1849,7 +1849,7 @@ def register_callbacks(app: dash.Dash):
                             style["vmin"], style["vmax"]
                         ),
                     )
-            # No reusable style yet — fall through to the full catalogue rebuild.
+            # No reusable style yet - fall through to the full catalogue rebuild.
         # Colour map only, unlocked: reuse the current range from display-style.
         if colormap_only and not locked:
             layer_entries = _layers_for_scale(style["vmin"], style["vmax"])
