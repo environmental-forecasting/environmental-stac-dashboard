@@ -18,14 +18,12 @@ from .leadtime_cog_urls import (
     layers_from_leadtime_cog_urls,
     leadtime_cog_urls_match_style,
     rewrite_leadtime_cog_urls_style,
-    rewrite_leadtime_cog_urls_tms,
 )
 from .projections import (
     WEB_MERCATOR_QUAD,
     MapEngine,
     MapViewMode,
     bbox_fits_view_mode,
-    collection_fits_view_mode,
     epsg_code_for_mode,
     is_custom_tms_mode,
     label_for_view_mode,
@@ -50,7 +48,6 @@ from .state import build_map_state, default_basemap, initial_map_state
 from .tile_urls import (
     build_cog_tile_url,
     rewrite_layer_entries_style,
-    rewrite_layer_entries_tms,
     rewrite_tile_url_style,
 )
 from .tms_client import (
@@ -76,7 +73,6 @@ __all__ = [
     "build_map_state",
     "build_map_request",
     "clear_tile_grid_cache",
-    "collection_fits_view_mode",
     "collections_list",
     "default_basemap",
     "DEFAULT_BASEMAP_ATTRIBUTION",
@@ -103,9 +99,7 @@ __all__ = [
     "resolve_engine_for_mode",
     "resolve_view_mode",
     "rewrite_layer_entries_style",
-    "rewrite_layer_entries_tms",
     "rewrite_leadtime_cog_urls_style",
-    "rewrite_leadtime_cog_urls_tms",
     "rewrite_tile_url_style",
     "tile_grid_from_tms",
     "tile_matrix_set_for_mode",

@@ -186,16 +186,3 @@ def rewrite_leadtime_cog_urls_style(
     if rescale is not None and len(rescale) >= 2:
         next_cache["rescale"] = [float(rescale[0]), float(rescale[1])]
     return next_cache
-
-
-def rewrite_leadtime_cog_urls_tms(
-    leadtime_cog_urls: dict[str, Any] | None, tile_matrix_set: str
-) -> dict[str, Any] | None:
-    """
-    Copy the leadtime COG URL cache with an updated tile matrix set id.
-    """
-    if not isinstance(leadtime_cog_urls, dict) or not tile_matrix_set:
-        return None
-    next_cache = dict(leadtime_cog_urls)
-    next_cache["tileMatrixSet"] = tile_matrix_set
-    return next_cache

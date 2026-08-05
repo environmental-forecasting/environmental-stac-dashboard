@@ -6,9 +6,6 @@ from typing import Any
 from .asset_urls import to_tiler_asset_url
 from .projections import WEB_MERCATOR_QUAD
 
-# ``/cog/tiles/{TileMatrixSetId}/{z}/{x}/{y}``
-_COG_TMS_PATH_RE = re.compile(r"(/cog/tiles/)([^/]+)(/)")
-
 
 def build_xyz_tile_url(
     *,
@@ -109,44 +106,6 @@ def rewrite_layer_entries_style(
         next_layer["tileUrl"] = rewrite_tile_url_style(
             url, colormap=colormap, rescale=rescale
         )
-        rewritten.append(next_layer)
-    return rewritten
-
-
-def rewrite_layer_entries_tms(
-    layers: list[dict[str, Any]] | None,
-    tile_matrix_set: str,
-) -> list[dict[str, Any]] | None:
-    """
-    Rewrite TiTiler TileMatrixSet path segments on existing layer URLs.
-
-    Used on view-mode switches so we avoid another STAC Item walk when only
-    the projection / TMS id changed.
-
-    Args:
-        layers: Current map-state layer entries.
-        tile_matrix_set: Target TMS id (e.g. ``WebMercatorQuad``, ``EPSG6931``).
-
-    Returns:
-        New layer list with updated ``tileUrl`` values, or None when any layer
-        is not a rewritable TiTiler COG URL.
-    """
-    if not layers or not tile_matrix_set:
-        return None
-    rewritten: list[dict[str, Any]] = []
-    for layer in layers:
-        if not isinstance(layer, dict):
-            return None
-        url = layer.get("tileUrl")
-        if not isinstance(url, str) or "/cog/tiles/" not in url:
-            return None
-        new_url, n = _COG_TMS_PATH_RE.subn(
-            rf"\g<1>{tile_matrix_set}\g<3>", url, count=1
-        )
-        if n != 1:
-            return None
-        next_layer = dict(layer)
-        next_layer["tileUrl"] = new_url
         rewritten.append(next_layer)
     return rewritten
 

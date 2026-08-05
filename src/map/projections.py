@@ -375,38 +375,6 @@ def resolve_mode_and_engine(mode: str | None) -> tuple[str, str]:
     return view_mode, resolve_engine_for_mode(view_mode)
 
 
-def collection_fits_view_mode(collection, mode: str) -> bool:
-    """
-    Return whether a STAC Collection belongs in the given map view.
-
-    Uses spatial bbox centre latitude (WGS84) for known polar EPSG codes.
-    Global / globe / unknown custom grids accept all collections. Unknown
-    extent is treated as a fit so listing still works.
-
-    Args:
-        collection: ``pystac.Collection`` (or object with ``extent``).
-        mode: View mode id.
-
-    Returns:
-        True if the collection should be drawn in this mode.
-    """
-    view_mode = normalise_view_mode(mode)
-    if view_mode in (
-        MapViewMode.GLOBAL_3857.value,
-        MapViewMode.GLOBE_CESIUM.value,
-    ):
-        return True
-
-    try:
-        bboxes = collection.extent.spatial.bboxes
-    except Exception:
-        return True
-    if not bboxes:
-        return True
-
-    return bbox_fits_view_mode(bboxes[0], view_mode)
-
-
 def bbox_fits_view_mode(bbox, mode: str) -> bool:
     """
     Return whether a WGS84 bbox centre belongs in the given map view.

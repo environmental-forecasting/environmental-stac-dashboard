@@ -10,7 +10,6 @@ from map.leadtime_cog_urls import (  # noqa: E402
     build_leadtime_cog_urls,
     layers_from_leadtime_cog_urls,
     leadtime_cog_urls_match_style,
-    rewrite_leadtime_cog_urls_tms,
 )
 
 
@@ -114,15 +113,3 @@ def test_leadtime_cog_urls_match_style_guards_every_style_field():
         )
 
     assert not leadtime_cog_urls_match_style(None, **matching)
-
-
-def test_rewrite_leadtime_cog_urls_tms_updates_matrix_set():
-    cache = {
-        "tilerBase": "http://tiler",
-        "tileMatrixSet": "WebMercatorQuad",
-        "collections": {},
-    }
-    rewritten = rewrite_leadtime_cog_urls_tms(cache, "EPSG6931")
-    assert rewritten is not None
-    assert rewritten["tileMatrixSet"] == "EPSG6931"
-    assert cache["tileMatrixSet"] == "WebMercatorQuad"

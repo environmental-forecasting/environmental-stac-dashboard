@@ -27,7 +27,7 @@ from map.projections import (  # noqa: E402
     view_mode_and_hint,
 )
 from map.asset_urls import to_tiler_asset_url  # noqa: E402
-from map.tile_urls import build_cog_tile_url, rewrite_layer_entries_tms  # noqa: E402
+from map.tile_urls import build_cog_tile_url  # noqa: E402
 from map.tms_client import (  # noqa: E402
     clear_tile_grid_cache,
     get_tile_grid,
@@ -293,37 +293,6 @@ def test_build_cog_tile_url_appends_style_query_params():
     assert "colormap_name=blues_r" in url
     assert "rescale=0.0,1.0" in url
     assert "bidx=2" in url
-
-
-def test_rewrite_layer_entries_tms_swaps_matrix_set_only():
-    layers = [
-        {
-            "id": "demo",
-            "tileUrl": (
-                "http://tiler/cog/tiles/WebMercatorQuad/{z}/{x}/{y}"
-                "?url=file:///data/cogs/demo.tif&rescale=0,1"
-            ),
-            "opacity": 1,
-        }
-    ]
-    rewritten = rewrite_layer_entries_tms(layers, "EPSG6931")
-    assert rewritten is not None
-    assert rewritten[0]["id"] == "demo"
-    assert rewritten[0]["opacity"] == 1
-    assert "/cog/tiles/EPSG6931/{z}/{x}/{y}?" in rewritten[0]["tileUrl"]
-    assert "rescale=0,1" in rewritten[0]["tileUrl"]
-    # Original list is not mutated.
-    assert "WebMercatorQuad" in layers[0]["tileUrl"]
-
-
-def test_rewrite_layer_entries_tms_rejects_non_cog_urls():
-    assert (
-        rewrite_layer_entries_tms(
-            [{"id": "x", "tileUrl": "http://tiles/xyz/{z}/{x}/{y}.png"}],
-            "EPSG6931",
-        )
-        is None
-    )
 
 
 def test_list_view_mode_presets_includes_polar_grid(monkeypatch):
