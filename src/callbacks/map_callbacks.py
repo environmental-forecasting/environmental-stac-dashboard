@@ -559,6 +559,34 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_call=True,
     )
 
+    # Debounce TMS clicks before Python rebuilds tile URLs.
+    app.clientside_callback(
+        """
+        function(mode) {
+            var nu = window.dash_clientside.no_update;
+            if (!mode) {
+                return nu;
+            }
+            if (window.__viewModePaintTimer) {
+                clearTimeout(window.__viewModePaintTimer);
+            }
+            window.__viewModePaintTimer = setTimeout(function () {
+                window.__viewModePaintTimer = null;
+                if (window.dash_clientside
+                        && typeof window.dash_clientside.set_props === "function") {
+                    window.dash_clientside.set_props("map-view-mode-paint", {
+                        data: { mode: mode, t: Date.now() },
+                    });
+                }
+            }, 400);
+            return nu;
+        }
+        """,
+        Output("map-bridge-tick", "data", allow_duplicate=True),
+        Input("map-view-mode", "value"),
+        prevent_initial_call=True,
+    )
+
     # Show north-up controls only for polar / custom EPSG#### modes.
     app.clientside_callback(
         """
@@ -1483,12 +1511,13 @@ def register_callbacks(app: dash.Dash):
         Input("forecast-init-date-picker", "value"),
         Input("variable-dropdown", "value"),
         Input("colormap-dropdown", "value"),
-        Input("map-view-mode", "value"),
+        Input("map-view-mode-paint", "data"),
         Input("map-style-refresh", "data"),
         Input("leadtime-confirm", "data"),
         State("display-style", "data"),
         State("map-request", "data"),
         State("leadtime-slider", "value"),
+        State("map-view-mode", "value"),
         prevent_initial_call=True,
     )
     def publish_map_request(
@@ -1496,12 +1525,13 @@ def register_callbacks(app: dash.Dash):
         forecast_start,
         variable,
         colormap,
-        map_view_mode,
+        map_view_mode_paint,
         style_refresh,
         leadtime_confirm,
         display_style,
         previous_request,
         leadtime_slider,
+        map_view_mode,
     ):
         """
         Translate control changes into a single paint intent.
@@ -1513,9 +1543,18 @@ def register_callbacks(app: dash.Dash):
         Leadtime confirms that carry ``force`` (init-day rewind) rebuild even
         while playing; routine confirms are marked ``leadtime_only`` so the
         painter can drop them mid-animation.
+
+        View-mode uses the debounced ``map-view-mode-paint`` store so rapid
+        TMS clicks only enqueue one Python rebuild.
         """
         triggered = callback_context.triggered_id
         prev = previous_request if isinstance(previous_request, dict) else None
+        if triggered == "map-view-mode-paint" and isinstance(
+            map_view_mode_paint, dict
+        ):
+            view_mode = map_view_mode_paint.get("mode") or map_view_mode
+        else:
+            view_mode = map_view_mode
 
         # Locked colormap edits are applied once overlays exist.
         if triggered == "colormap-dropdown" and normalise_display_style(
@@ -1554,7 +1593,7 @@ def register_callbacks(app: dash.Dash):
                     style_cmap,
                     prev.get("colormap"),
                 ),
-                view_mode=map_view_mode or prev.get("view_mode"),
+                view_mode=view_mode or prev.get("view_mode"),
                 lead=lead,
                 force_stats=False,
                 clear_lock=False,
@@ -1566,7 +1605,8 @@ def register_callbacks(app: dash.Dash):
             # the scrubber callback rewinds it.
             lead = 0
         elif (
-            triggered in ("map-view-mode", "colormap-dropdown", "map-style-refresh")
+            triggered
+            in ("map-view-mode-paint", "colormap-dropdown", "map-style-refresh")
             and prev
         ):
             lead = prev.get("lead", 0)
@@ -1584,7 +1624,7 @@ def register_callbacks(app: dash.Dash):
             and prev.get("variable") != band
         )
         tms_only = (
-            triggered == "map-view-mode"
+            triggered == "map-view-mode-paint"
             and prev is not None
             and band is not None
             and prev.get("collection") == cols
@@ -1607,7 +1647,7 @@ def register_callbacks(app: dash.Dash):
             forecast_start=forecast_start,
             variable=variable,
             colormap=colormap,
-            view_mode=map_view_mode,
+            view_mode=view_mode,
             lead=lead,
             force_stats=force_stats,
             clear_lock=clear_lock,
@@ -1630,6 +1670,7 @@ def register_callbacks(app: dash.Dash):
         State("display-style", "data"),
         State("map-state", "data"),
         State("leadtime-playing", "data"),
+        State("map-view-mode", "value"),
         prevent_initial_call=True,
     )
     def update_cog_layer(
@@ -1637,6 +1678,7 @@ def register_callbacks(app: dash.Dash):
         display_style,
         map_state,
         leadtime_playing,
+        live_view_mode,
     ):
         """
         Resolve tiles from ``map-request`` and publish ``map-state``.
@@ -1703,6 +1745,14 @@ def register_callbacks(app: dash.Dash):
         # The browser owns the frame while playing; confirming every step
         # would queue a Python rebuild behind each tick.
         if leadtime_only and leadtime_playing:
+            return no_update, no_update, no_update, no_update
+
+        # Drop paints for a TMS the user has already left (queued map-request).
+        if (
+            live_view_mode
+            and map_view_mode
+            and live_view_mode != map_view_mode
+        ):
             return no_update, no_update, no_update, no_update
 
         # A new variable must not keep a pinned range from the previous band.

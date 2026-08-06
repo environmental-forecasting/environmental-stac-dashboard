@@ -42,6 +42,8 @@
   // Optimistic engine switches use revisions above this so a later Python
   // map-state publish (revision N+1) still applies.
   var LOCAL_REVISION_BASE = 1000000000;
+  // Live pill selection; ignore late Python map-state for a mode already left.
+  var desiredMode = null;
   var busyTimer = null;
   var busyVisible = false;
   // JS only stores a tiles wait here; Dash owns every other busy label.
@@ -607,6 +609,13 @@
       endDashMapWait();
       return;
     }
+    // Ignore late Python publishes for a TMS the user has already left.
+    if (desiredMode && state.mode && state.mode !== desiredMode) {
+      return;
+    }
+    if (state.mode) {
+      desiredMode = state.mode;
+    }
     var previous = lastState;
     lastRevision = state.revision;
     // Keep a copy for optimistic engine switches (before Python round-trips).
@@ -801,39 +810,48 @@
    *
    * ``presets`` is ``{ mode: viewHint }`` from the Dash store, including polar
    * tile-grid hints so Arctic/Antarctic do not wait on Python. Overlay layers
-   * are cleared until Python rebuilds URLs for the new TMS.
+   * are cleared until Python rebuilds URLs for the new TMS (do not rewrite
+   * TileMatrixSet client-side; that mismatched CRS and tiles).
    */
   function applyViewMode(mode, presets) {
     if (!mode || !lastState) {
       return;
     }
+    desiredMode = mode;
     if (mode === (lastState.mode || "")) {
       // Same TMS / view mode: restore that mode's default framing.
       resetView();
       return;
     }
+    if (prefetchTimer) {
+      clearTimeout(prefetchTimer);
+      prefetchTimer = null;
+    }
     var engine = engineForMode(mode);
-    var tms = tmsForMode(mode);
-    var view = null;
-    if (presets && presets[mode]) {
-      view = presets[mode];
-    } else if (lastState.view && tms === "WebMercatorQuad") {
-      view = lastState.view;
+    // Always take the preset for this mode. Reusing lastState.view when switching
+    // to Global reused the polar camera and looked like "the other" TMS.
+    var view = presets && presets[mode] ? presets[mode] : null;
+    if (!view) {
+      // No preset yet: drop overlays only; Python will publish the matching view.
+      applyState(
+        Object.assign({}, lastState, {
+          layers: [],
+          leadtimeCogUrls: null,
+          revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
+        })
+      );
+      return;
     }
-    // Clear forecasts until Python rebuilds for the new TMS / hemisphere.
-    // Rewriting TileMatrixSet on old URLs blanks polar to global; keeping them
-    // requests the wrong grid. Basemap shows through the short wait.
-    var next = Object.assign({}, lastState, {
-      engine: engine,
-      mode: mode,
-      layers: [],
-      leadtimeCogUrls: null,
-      revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
-    });
-    if (view) {
-      next.view = view;
-    }
-    applyState(next);
+    applyState(
+      Object.assign({}, lastState, {
+        engine: engine,
+        mode: mode,
+        layers: [],
+        leadtimeCogUrls: null,
+        view: view,
+        revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
+      })
+    );
   }
 
   var LEAFLET_WORLD_BOUNDS = [

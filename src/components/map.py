@@ -232,6 +232,8 @@ leaflet_map = html.Div(
         # Sole paint intent for update_cog_layer (controls only seed this store).
         dcc.Store(id="map-request", data=None),
         dcc.Store(id="map-view-presets", data={}),
+        # Debounced view-mode for Python; live pill still drives optimistic UI.
+        dcc.Store(id="map-view-mode-paint", data=None),
         dcc.Store(id="map-bridge-tick", data=0),
         dcc.Store(id="map-goto", data=None),
         # Lightweight region meta only (never the full GeoJSON).
