@@ -16,27 +16,45 @@ logger = logging.getLogger(__name__)
 class _InternalStacApiIO(StacApiIO):
     """Rewrite public ``/api`` hrefs to the in-network STAC root.
 
-    Staging/prod advertise ``.../api/...`` in STAC links (for Traefik), while
+    Staging/prod/dev advertise ``.../api/...`` in STAC links (for Traefik), while
     uvicorn still serves routes at ``/``. Strip the prefix for container-to-
-    container calls from the dashboard.
+    container calls from the dashboard. Pagination ``next`` links can also
+    advertise ``.../api/api/...`` when ``ROOT_PATH=/api`` is set; strip every
+    leading ``/api`` segment after the in-network base.
     """
 
     def __init__(self, base_url: str, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._base = base_url.rstrip("/")
-        self._public_api = f"{self._base}/api"
 
     def _to_internal(self, href: str) -> str:
-        if href == self._public_api or href == f"{self._public_api}/":
-            return f"{self._base}/"
-        if href.startswith(f"{self._public_api}/"):
-            return f"{self._base}/{href[len(self._public_api) + 1 :]}"
+        # ROOT_PATH=/api makes some pagination links advertise ``/api/api/...``.
+        # Strip every leading ``/api`` segment after the in-network base.
+        marker = f"{self._base}/api"
+        while href == marker or href == f"{marker}/" or href.startswith(marker + "/"):
+            href = (
+                f"{self._base}/"
+                if href.rstrip("/") == marker
+                else f"{self._base}/{href[len(marker) + 1 :]}"
+            )
         return href
 
-    def read_text(self, source, *args, **kwargs):
-        if isinstance(source, str):
-            source = self._to_internal(source)
-        return super().read_text(source, *args, **kwargs)
+    def request(
+        self,
+        href: str,
+        method: str | None = None,
+        headers: dict[str, str] | None = None,
+        parameters: dict[str, Any] | None = None,
+    ) -> str:
+        # Item Search passes a Link into read_text, which then calls request()
+        # with the advertised ``/api/search`` href. Rewrite here so Link-driven
+        # and string calls both hit uvicorn paths without the Traefik prefix.
+        return super().request(
+            self._to_internal(href),
+            method=method,
+            headers=headers,
+            parameters=parameters,
+        )
 
 # Slim Item Search field set for building the forecast date picker.
 # Drop geometry and assets so listing many inits stays cheap.

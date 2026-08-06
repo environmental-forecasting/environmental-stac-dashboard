@@ -1071,8 +1071,8 @@ def register_callbacks(app: dash.Dash):
 
         Prefer inits already primed from Collection summaries at dropdown
         load; otherwise list_forecast_inits falls back to a slim Item Search.
-        Seed the picker from browser prefs when the current day is empty or
-        no longer available.
+        Seed the picker from browser prefs when possible, otherwise the latest
+        available init so the leadtime axis can activate.
         """
         if not collection_ids:
             return [None, None, None, None, None, None, _BUSY_HIDDEN]
@@ -1133,11 +1133,10 @@ def register_callbacks(app: dash.Dash):
             date_value = no_update
         elif preferred_day is not None:
             date_value = preferred_day
-        elif current_date:
-            # Stale day for this collection set; clear rather than leave disabled.
-            date_value = None
         else:
-            date_value = no_update
+            # No valid selection yet (first load, or stale day after collection
+            # change). Seed the latest init so the leadtime axis can activate.
+            date_value = max_date
 
         return [
             forecast_dates_dict,
