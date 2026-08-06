@@ -1,6 +1,15 @@
 """Rewrite STAC asset hrefs for TiTiler on the Docker network."""
 
 
+def _scheme_variants(url: str) -> tuple[str, ...]:
+    """Return ``url`` plus the http/https alternate when applicable."""
+    if url.startswith("https://"):
+        return (url, "http://" + url[len("https://") :])
+    if url.startswith("http://"):
+        return (url, "https://" + url[len("http://") :])
+    return (url,)
+
+
 def to_tiler_asset_url(
     href: str, file_server_url: str, file_server_internal_url: str
 ) -> str:
@@ -9,7 +18,7 @@ def to_tiler_asset_url(
 
     Paths under ``/data/`` become ``file:///data/...`` (TiTiler mounts
     ``./data`` at ``/data``). Other matched hrefs keep an internal HTTP
-    rewrite. Public STAC/QGIS hrefs stay HTTP at the source; only the
+    rewrite. Public STAC/QGIS hrefs may be ``http`` or ``https``; only the
     TiTiler ``url`` query parameter is rewritten.
 
     Args:
@@ -27,9 +36,17 @@ def to_tiler_asset_url(
     public = (file_server_url or "").rstrip("/")
     internal = (file_server_internal_url or "").rstrip("/")
 
+    prefixes: list[str] = []
+    for base in (public, internal):
+        if not base:
+            continue
+        for variant in _scheme_variants(base):
+            if variant not in prefixes:
+                prefixes.append(variant)
+
     path = None
-    for prefix in (public, internal):
-        if prefix and (href == prefix or href.startswith(prefix + "/")):
+    for prefix in prefixes:
+        if href == prefix or href.startswith(prefix + "/"):
             path = href[len(prefix) :] or "/"
             break
 

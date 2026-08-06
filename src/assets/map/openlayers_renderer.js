@@ -451,6 +451,12 @@
     var source = new ol.source.XYZ(options);
     // Drop tiles outside the COG footprint (TiTiler outside-bounds 404s).
     // Near-global footprints skip setExtent so wrap still works; filter here.
+    // Custom polar TMS: do not filter. Full-lon STAC bboxes (e.g. IceNet
+    // [-180, ~17, 180, 90]) collapse under transformExtent in EPSG:6931/6932
+    // (±180 and the pole map to a line), which wrongly skips most tiles.
+    if (tileGrid) {
+      return source;
+    }
     var extent = layerExtentFromBbox(bbox, { allowWorldWide: true });
     if (!extent) {
       return source;

@@ -258,6 +258,23 @@ def test_to_tiler_asset_url_uses_file_scheme_for_data_mount():
         )
         == "https://example.com/other.tif"
     )
+    # Public FILE_SERVER_URL may be https while STAC hrefs stay http (or vice versa).
+    assert (
+        to_tiler_asset_url(
+            "http://localhost/files/data/cogs/demo.tif",
+            "https://localhost/files",
+            "http://file-server",
+        )
+        == "file:///data/cogs/demo.tif"
+    )
+    assert (
+        to_tiler_asset_url(
+            "https://localhost/files/data/cogs/demo.tif",
+            "http://localhost/files",
+            "http://file-server",
+        )
+        == "file:///data/cogs/demo.tif"
+    )
 
 
 def test_build_cog_tile_url_rewrites_file_server_and_keeps_xyz_placeholders():
