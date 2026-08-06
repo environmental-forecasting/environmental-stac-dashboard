@@ -439,6 +439,8 @@
     var options = {
       url: url,
       crossOrigin: "anonymous",
+      // Retain decoded tile bitmaps in GPU/browser memory across leadtime scrub.
+      cacheSize: 2048,
       // Global/WebMercator: wrap across ±180 so ice COGs can paint on both
       // sides of the date line. Custom polar tile grids stay unwrapped.
       wrapX: wrapX,
@@ -570,6 +572,7 @@
         url: DEFAULT_BASEMAP_URL,
         projection: "EPSG:3857",
         crossOrigin: "anonymous",
+        cacheSize: 2048,
         attributions: DEFAULT_BASEMAP_ATTRIBUTION,
       }),
       zIndex: 0,
@@ -684,6 +687,7 @@
         url: basemap.url,
         projection: "EPSG:3857",
         crossOrigin: "anonymous",
+        cacheSize: 2048,
         attributions:
           basemap.attribution || DEFAULT_BASEMAP_ATTRIBUTION,
       })
