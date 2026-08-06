@@ -1,5 +1,5 @@
 [project]
-# site_url = "https://environmental-forecasting.github.io/environmental-stac-dashboard/"
+site_url = "https://environmental-forecasting.github.io/environmental-stac-dashboard/"
 site_name = "environmental-stac-dashboard"
 site_description = "Visualise earth system forecast predictions"
 site_author = "Bryn Noel Ubald"
