@@ -287,7 +287,7 @@ def test_build_cog_tile_url_rewrites_file_server_and_keeps_xyz_placeholders():
     )
 
     assert url.startswith(
-        "http://localhost:8002/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?url="
+        "http://localhost:8002/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.webp?url="
     )
     assert "file:///data/cogs/demo.tif" in url
     assert "localhost:8001" not in url.split("url=")[1]
@@ -306,7 +306,7 @@ def test_build_cog_tile_url_appends_style_query_params():
         band_index=2,
     )
 
-    assert "/cog/tiles/EPSG6931/{z}/{x}/{y}?" in url
+    assert "/cog/tiles/EPSG6931/{z}/{x}/{y}.webp?" in url
     assert "colormap_name=blues_r" in url
     assert "rescale=0.0,1.0" in url
     assert "bidx=2" in url

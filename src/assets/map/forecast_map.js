@@ -278,7 +278,7 @@
         tilerBase.replace(/\/$/, "") +
         "/cog/tiles/" +
         tms +
-        "/{z}/{x}/{y}?url=" +
+        "/{z}/{x}/{y}.webp?url=" +
         hrefs[lead];
       if (cache.colormap) {
         tileUrl += "&colormap_name=" + cache.colormap;

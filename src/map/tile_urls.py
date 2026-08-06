@@ -31,7 +31,7 @@ def build_xyz_tile_url(
         XYZ template URL with ``{z}``, ``{x}``, and ``{y}`` placeholders.
     """
     tile_url = (
-        f"{tiler_base.rstrip('/')}/cog/tiles/{tile_matrix_set}/{{z}}/{{x}}/{{y}}"
+        f"{tiler_base.rstrip('/')}/cog/tiles/{tile_matrix_set}/{{z}}/{{x}}/{{y}}.webp"
         f"?url={asset_url}"
     )
     if colormap:
