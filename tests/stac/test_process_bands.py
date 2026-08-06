@@ -51,8 +51,7 @@ def test_bands_from_asset_dicts_skips_non_data_assets():
 
 def test_list_forecast_bands_uses_slim_search_then_cache():
     stac = object.__new__(STAC)
-    stac._item_cache = {}
-    stac._bands_cache = {}
+    stac._cache = {}
     stac._catalog = MagicMock()
     search = MagicMock()
     search.items_as_dicts.return_value = [
@@ -80,7 +79,7 @@ def test_list_forecast_bands_uses_slim_search_then_cache():
 
 def test_list_forecast_bands_prefers_item_cache():
     stac = object.__new__(STAC)
-    stac._bands_cache = {}
+    stac._cache = {}
     stac._catalog = MagicMock()
 
     asset = MagicMock()
@@ -89,7 +88,7 @@ def test_list_forecast_bands_prefers_item_cache():
     }
     item = MagicMock()
     item.get_assets.return_value = {"forecast": asset}
-    stac._item_cache = {("col", "2024-01-01T00:00:00Z"): item}
+    stac._cache_set(stac._NS_ITEM, item, "col", "2024-01-01T00:00:00Z")
 
     bands = stac.list_forecast_bands("col", "2024-01-01T00:00:00Z")
 

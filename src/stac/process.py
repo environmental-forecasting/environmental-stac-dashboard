@@ -163,11 +163,37 @@ class STAC:
         """Build a namespaced cache key from namespace + key parts."""
         return "|".join([ns, *parts])
 
+    def _active_cache(self) -> diskcache.Cache | dict:
+        """
+        Return the STAC cache store.
+
+        Production always uses the shared ``diskcache.Cache``. Unit tests that
+        build ``STAC`` via ``object.__new__`` may assign ``self._cache = {}``
+        so they never touch ``/tmp``.
+        """
+        cache = getattr(self, "_cache", None)
+        if cache is None:
+            cache = _get_shared_cache()
+            self._cache = cache
+        return cache
+
     def _cache_get(self, ns: str, *parts: str) -> Any:
-        return self._cache.get(self._ckey(ns, *parts))
+        """Read a namespaced value from the active cache store."""
+        store = self._active_cache()
+        key = self._ckey(ns, *parts)
+        # dict: in-memory test double; otherwise diskcache.Cache.
+        if isinstance(store, dict):
+            return store.get(key)
+        return store.get(key)
 
     def _cache_set(self, ns: str, value: Any, *parts: str) -> None:
-        self._cache.set(self._ckey(ns, *parts), value)
+        """Write a namespaced value to the active cache store."""
+        store = self._active_cache()
+        key = self._ckey(ns, *parts)
+        if isinstance(store, dict):
+            store[key] = value
+        else:
+            store.set(key, value)
 
     def _search_collection(self, collection_id) -> ItemSearch:
         search = self._catalog.search(collections=[collection_id], max_items=None)
