@@ -6,6 +6,7 @@ dash-html-components
 dash_iconify
 dash-leaflet
 dash_mantine_components
+diskcache
 gunicorn
 pandas
 pystac

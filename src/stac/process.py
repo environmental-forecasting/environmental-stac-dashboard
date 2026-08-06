@@ -1,7 +1,9 @@
 import logging
+import os
 from datetime import datetime as dt
 from typing import Any, Iterable
 
+import diskcache
 from pystac import Asset, Collection, Item, MediaType
 from pystac_client import Client, ItemSearch
 from pystac_client.stac_api_io import StacApiIO
@@ -11,6 +13,27 @@ from .leadtime_axis import leadtime_axis_payload, ordered_cog_assets
 from .timefmt import parse_stac_datetime, to_stac_datetime
 
 logger = logging.getLogger(__name__)
+
+# Cross-process shared cache for STAC Items, bands, inits, and Collections.
+# Lives on /tmp (tmpfs in Docker) so it is fast and ephemeral across restarts.
+# All gunicorn workers share this store via diskcache's file-locking protocol,
+# so each STAC API round-trip happens at most once across the process group.
+_CACHE_DIR = os.environ.get("STAC_DISK_CACHE_DIR", "/tmp/stac-dashboard-cache")
+_shared_cache: diskcache.Cache | None = None
+
+
+def _get_shared_cache() -> diskcache.Cache:
+    """Return the process-wide shared diskcache instance, creating it once."""
+    global _shared_cache
+    if _shared_cache is None:
+        _shared_cache = diskcache.Cache(
+            _CACHE_DIR,
+            # Use pickle so pystac Item/Collection objects serialise correctly.
+            disk=diskcache.Disk,
+            size_limit=256 * 1024 * 1024,  # 256 MiB cap
+        )
+        logger.info("Shared STAC disk cache opened at %s", _CACHE_DIR)
+    return _shared_cache
 
 
 class _InternalStacApiIO(StacApiIO):
@@ -108,6 +131,13 @@ def band_rescale_from_asset(
 
 
 class STAC:
+    # Namespace prefixes keep the four logical caches collision-free inside the
+    # single shared diskcache store.
+    _NS_ITEM = "item"
+    _NS_BANDS = "bands"
+    _NS_INITS = "inits"
+    _NS_COLL = "coll"
+
     def __init__(self, STAC_FASTAPI_URL: str) -> None:
         # Refer to pystac-client docs:
         # https://pystac-client.readthedocs.io/en/stable/usage.html
@@ -121,14 +151,23 @@ class STAC:
         stac_api_io = _InternalStacApiIO(STAC_FASTAPI_URL, max_retries=retry)
         self._url = STAC_FASTAPI_URL
         self._catalog = Client.open(STAC_FASTAPI_URL, stac_io=stac_api_io)
-        # Cache full Items by (collection_id, forecast:reference_time).
-        self._item_cache: dict[tuple[str, str], Item] = {}
-        # Remember which variable names each forecast init offers.
-        self._bands_cache: dict[tuple[str, str], dict[str, int]] = {}
-        # Cache forecast init rows by collection_id (summaries or slim search).
-        self._forecast_inits_cache: dict[str, list[dict[str, Any]]] = {}
-        # Cache Collection objects already fetched (e.g. dropdown listing).
-        self._collection_cache: dict[str, Collection] = {}
+        # Shared cross-process cache (all gunicorn workers read/write the same
+        # store). Replaces the four per-worker in-memory dicts so a cold STAC
+        # API fetch only happens once regardless of which worker handles the
+        # first request for a given key.
+        self._cache = _get_shared_cache()
+
+    # Internal cache helpers
+
+    def _ckey(self, ns: str, *parts: str) -> str:
+        """Build a namespaced cache key from namespace + key parts."""
+        return "|".join([ns, *parts])
+
+    def _cache_get(self, ns: str, *parts: str) -> Any:
+        return self._cache.get(self._ckey(ns, *parts))
+
+    def _cache_set(self, ns: str, value: Any, *parts: str) -> None:
+        self._cache.set(self._ckey(ns, *parts), value)
 
     def _search_collection(self, collection_id) -> ItemSearch:
         search = self._catalog.search(collections=[collection_id], max_items=None)
@@ -172,20 +211,20 @@ class STAC:
         ``GET /collections/{id}``.
         """
         for collection in collections:
-            self._collection_cache[collection.id] = collection
-            if collection.id in self._forecast_inits_cache:
+            self._cache_set(self._NS_COLL, collection, collection.id)
+            if self._cache_get(self._NS_INITS, collection.id) is not None:
                 continue
             inits = self._list_forecast_inits_from_summaries(collection)
             if inits is not None:
-                self._forecast_inits_cache[collection.id] = inits
+                self._cache_set(self._NS_INITS, inits, collection.id)
 
     def _get_collection(self, collection_id: str) -> Collection:
         """Return a Collection, reusing one already cached when present."""
-        cached = self._collection_cache.get(collection_id)
+        cached = self._cache_get(self._NS_COLL, collection_id)
         if cached is not None:
             return cached
         collection = self._catalog.get_collection(collection_id)
-        self._collection_cache[collection_id] = collection
+        self._cache_set(self._NS_COLL, collection, collection_id)
         return collection
 
     def get_collection_extents(self, collection_id):
@@ -214,7 +253,7 @@ class STAC:
             Sorted list of dicts with keys:
             ``datetime``, ``reference_time``, ``end_time``, ``leadtime_length``.
         """
-        cached = self._forecast_inits_cache.get(collection_id)
+        cached = self._cache_get(self._NS_INITS, collection_id)
         if cached is not None:
             return cached
 
@@ -236,7 +275,7 @@ class STAC:
             if from_summaries is not None
             else self._list_forecast_inits_from_search(collection_id)
         )
-        self._forecast_inits_cache[collection_id] = inits
+        self._cache_set(self._NS_INITS, inits, collection_id)
         return inits
 
     def _list_forecast_inits_from_summaries(
@@ -370,13 +409,15 @@ class STAC:
         self, collection_id: str, forecast_reference_time: str
     ) -> Item:
         """
-        Return the full STAC Item for a forecast init, with per-client caching.
+        Return the full STAC Item for a forecast init, with shared cross-process
+        caching via diskcache.
 
         Repeated calls with the same collection and reference time reuse the
         cached Item (COGs, bands, leadtime) without another HTTP search.
+        Any gunicorn worker that already fetched and stored the Item makes it
+        immediately available to all other workers.
         """
-        cache_key = (collection_id, forecast_reference_time)
-        cached = self._item_cache.get(cache_key)
+        cached = self._cache_get(self._NS_ITEM, collection_id, forecast_reference_time)
         if cached is not None:
             return cached
 
@@ -397,12 +438,12 @@ class STAC:
             )
 
         item = items[0]
-        self._item_cache[cache_key] = item
+        self._cache_set(self._NS_ITEM, item, collection_id, forecast_reference_time)
         # Filling the variables dropdown can reuse this Item's band list.
-        if cache_key not in self._bands_cache:
+        if self._cache_get(self._NS_BANDS, collection_id, forecast_reference_time) is None:
             bands = self._bands_from_item(item)
             if bands:
-                self._bands_cache[cache_key] = bands
+                self._cache_set(self._NS_BANDS, bands, collection_id, forecast_reference_time)
         return item
 
     def get_item_extents(self, collection_id: str, forecast_reference_time: str):
@@ -507,15 +548,14 @@ class STAC:
         dropdown can fill without waiting on a full Item download. Reuses a
         full Item already held in memory when present.
         """
-        cache_key = (collection_id, forecast_reference_time)
-        cached = self._bands_cache.get(cache_key)
+        cached = self._cache_get(self._NS_BANDS, collection_id, forecast_reference_time)
         if cached is not None:
             return cached
 
-        item = self._item_cache.get(cache_key)
+        item = self._cache_get(self._NS_ITEM, collection_id, forecast_reference_time)
         if item is not None:
             bands = self._bands_from_item(item)
-            self._bands_cache[cache_key] = bands
+            self._cache_set(self._NS_BANDS, bands, collection_id, forecast_reference_time)
             return bands
 
         search = self._catalog.search(
@@ -527,7 +567,7 @@ class STAC:
         for raw in search.items_as_dicts():
             bands = self._bands_from_asset_dicts(raw.get("assets") or {})
             if bands:
-                self._bands_cache[cache_key] = bands
+                self._cache_set(self._NS_BANDS, bands, collection_id, forecast_reference_time)
                 logger.debug(
                     "Loaded %s bands for %s @ %s via slim Item Search",
                     len(bands),
@@ -540,16 +580,16 @@ class STAC:
         try:
             cogs = self.get_item_cogs(collection_id, forecast_reference_time)
         except ValueError:
-            self._bands_cache[cache_key] = {}
+            self._cache_set(self._NS_BANDS, {}, collection_id, forecast_reference_time)
             return {}
         if not cogs:
-            self._bands_cache[cache_key] = {}
+            self._cache_set(self._NS_BANDS, {}, collection_id, forecast_reference_time)
             return {}
         first_id = next(iter(cogs))
         bands = self.get_asset_bands(
             collection_id, forecast_reference_time, first_id
         )
-        self._bands_cache[cache_key] = bands
+        self._cache_set(self._NS_BANDS, bands, collection_id, forecast_reference_time)
         return bands
 
     def get_band_rescale(
