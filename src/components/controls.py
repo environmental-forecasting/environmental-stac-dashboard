@@ -8,6 +8,22 @@ from rio_tiler.colormap import ColorMaps
 AVAILABLE_COLORMAPS = ColorMaps().list()
 DEFAULT_COLORMAP = "blues_r"
 
+
+def forecast_init_disabled_dates(allowed_days) -> dict:
+    """
+    Restrict the picker to these forecast start days.
+
+    Send the available days, not every gap between the first and last init.
+    A sparse archive over years stays small that way.
+    """
+    if not isinstance(allowed_days, dict):
+        allowed_days = {day: True for day in allowed_days}
+    return {
+        "function": "disableUnlessForecastInit",
+        "options": {"allowed": allowed_days},
+    }
+
+
 controls_panel = html.Div(
     [
         html.Div(
@@ -33,6 +49,7 @@ controls_panel = html.Div(
             size="sm",
             w="100%",
             popoverProps={"zIndex": 10000},
+            disabledDates=forecast_init_disabled_dates(()),
             className="forecast-controls__datepicker",
         ),
         html.Label("Variable"),

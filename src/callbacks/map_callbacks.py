@@ -6,8 +6,11 @@ from functools import lru_cache
 
 import dash
 import dash_leaflet as dl
-import pandas as pd
-from components.controls import AVAILABLE_COLORMAPS, DEFAULT_COLORMAP
+from components.controls import (
+    AVAILABLE_COLORMAPS,
+    DEFAULT_COLORMAP,
+    forecast_init_disabled_dates,
+)
 from config import (
     FILE_SERVER_INTERNAL_URL,
     FILE_SERVER_URL,
@@ -1099,8 +1102,9 @@ def register_callbacks(app: dash.Dash):
 
         Prefer inits already primed from Collection summaries at dropdown
         load; otherwise list_forecast_inits falls back to a slim Item Search.
-        Seed the picker from browser prefs when possible, otherwise the latest
-        available init so the leadtime axis can activate.
+        The picker is given those init days only, not every gap in the
+        calendar range. Seed from browser prefs when possible, otherwise
+        the latest available init so the leadtime axis can activate.
         """
         if not collection_ids:
             return [None, None, None, None, None, None, _BUSY_HIDDEN]
@@ -1146,13 +1150,6 @@ def register_callbacks(app: dash.Dash):
             "Available forecast start dates from %s to %s", min_date, max_date
         )
 
-        # Calculate disabled dates
-        date_range = pd.date_range(min_date, max_date)
-        available_dates = {d.date() for d in sorted_dates}
-        disabled_dates = [
-            to_calendar_day(d) for d in date_range if d.date() not in available_dates
-        ]
-
         preferred_day = preferred_in(user_prefs, "forecast_start", forecast_dates_dict)
         current_ok = (
             isinstance(current_date, str) and current_date in forecast_dates_dict
@@ -1171,7 +1168,7 @@ def register_callbacks(app: dash.Dash):
             min_date,
             max_date,
             initial_visible_month,
-            disabled_dates,
+            forecast_init_disabled_dates(forecast_dates_dict),
             date_value,
             _BUSY_HIDDEN,
         ]
