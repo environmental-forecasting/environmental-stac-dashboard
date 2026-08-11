@@ -12,13 +12,7 @@ from .basemap import (
     list_basemap_options,
     normalise_basemap_id,
 )
-from .leadtime_cog_urls import (
-    bank_has_item_ids,
-    build_leadtime_cog_urls,
-    layers_from_leadtime_cog_urls,
-    leadtime_cog_urls_match_style,
-    rewrite_leadtime_cog_urls_style,
-)
+from .leadtime_cog_urls import rewrite_leadtime_cog_urls_style
 from .projections import (
     WEB_MERCATOR_QUAD,
     MapEngine,
@@ -66,11 +60,9 @@ __all__ = [
     "WEB_MERCATOR_QUAD",
     "MapEngine",
     "MapViewMode",
-    "bank_has_item_ids",
     "basemap_descriptor",
     "bbox_fits_view_mode",
     "build_item_tile_url",
-    "build_leadtime_cog_urls",
     "build_map_state",
     "build_map_request",
     "clear_tile_grid_cache",
@@ -84,8 +76,6 @@ __all__ = [
     "initial_map_state",
     "is_custom_tms_mode",
     "label_for_view_mode",
-    "layers_from_leadtime_cog_urls",
-    "leadtime_cog_urls_match_style",
     "list_basemap_options",
     "list_custom_epsg_tms_ids",
     "list_view_mode_options",

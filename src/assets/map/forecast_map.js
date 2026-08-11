@@ -271,7 +271,7 @@
   /**
    * Build overlay layers for one leadtime from the published Item cache.
    *
-   * Mirrors `layers_from_leadtime_cog_urls`. Scrubbing only changes ``assets=``.
+   * Scrubbing only changes ``assets=``.
    */
   function layersFromLeadtimeCogUrls(cache, lead) {
     if (!cache || !cache.collections || lead == null || lead < 0) {
@@ -2387,13 +2387,6 @@
       refTime: opts.datetime,
       collections: collections,
     };
-    setDashProps("forecast-item-client", {
-      data: {
-        date: opts.date,
-        collections: Object.keys(collections),
-        ts: Date.now(),
-      },
-    });
     paintLeadtimeCache(cache, 0);
     if (Object.keys(bandTable.bands).length) {
       var options = Object.keys(bandTable.bands).map(function (name) {
