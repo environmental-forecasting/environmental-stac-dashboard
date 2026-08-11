@@ -79,6 +79,11 @@ class _InternalStacApiIO(StacApiIO):
             parameters=parameters,
         )
 
+# Page size for listing inits when Collection summaries cannot be used.
+# Matches pgSTAC's usual max so a mixed-leadtime fallback needs less
+# HTTP round trips than the API default of 10.
+_FORECAST_INIT_SEARCH_LIMIT = 10000
+
 # Slim Item Search field set for building the forecast date picker.
 # Drop geometry and assets so listing many inits stays cheap.
 _FORECAST_INIT_FIELDS = {
@@ -385,6 +390,7 @@ class STAC:
         search = self._catalog.search(
             collections=[collection_id],
             fields=_FORECAST_INIT_FIELDS,
+            limit=_FORECAST_INIT_SEARCH_LIMIT,
             max_items=None,
         )
 
