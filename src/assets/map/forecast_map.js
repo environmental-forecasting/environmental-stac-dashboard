@@ -15,8 +15,8 @@
  * a Dash round trip on OpenLayers and Cesium.
  *
  * Busy banner ownership: Dash owns catalog / dates / variables / map labels
- * on `#forecast-busy`. This module only shows "Loading tiles…" after a soft
- * swap or full apply that must wait for paint, so the two sides do not fight.
+ * on `#forecast-busy`. This module switches to "Loading tiles…" after a
+ * rebuild that must wait for paint, and hides it when those tiles are ready.
  */
 
 (function (global) {
@@ -28,9 +28,9 @@
   var activeEngine = "openlayers";
   var tilesReady = true;
   var readyTimeout = null;
-  // Playback gates on tilesReady; keep this short so a missed rendercomplete
-  // cannot freeze Play for tens of seconds when switching TMS / engines.
-  var READY_TIMEOUT_MS = 4000;
+  // Safety only: Play never arms this wait. Date / scrub can take longer
+  // than a few seconds to fill the viewport, so do not hide the banner early.
+  var READY_TIMEOUT_MS = 30000;
   // Prefetching cannot compete with the tiles the user is waiting on.
   var PREFETCH_DELAY_MS = 600;
   var prefetchTimer = null;
@@ -49,6 +49,8 @@
   // JS only stores a tiles wait here; Dash owns every other busy label.
   var busyReasons = {};
   var BUSY_SHOW_DELAY_MS = 220;
+  // Scrub/play should stay quiet unless a step is still waiting after this.
+  var SCRUB_BUSY_DELAY_MS = 1000;
   var northUpEscBound = false;
 
   function busyEl() {
@@ -103,7 +105,7 @@
     busyVisible = true;
   }
 
-  function scheduleBusyShow() {
+  function scheduleBusyShow(delayMs) {
     if (busyVisible) {
       showBusyNow();
       return;
@@ -111,17 +113,21 @@
     if (busyTimer) {
       clearTimeout(busyTimer);
     }
+    var wait = delayMs == null ? BUSY_SHOW_DELAY_MS : delayMs;
     busyTimer = setTimeout(function () {
       busyTimer = null;
       showBusyNow();
-    }, BUSY_SHOW_DELAY_MS);
+    }, wait);
   }
 
   /**
    * Mark the UI as waiting on tiles. Only the tiles reason is used here;
    * Dash writes every other busy label straight onto `#forecast-busy`.
+   *
+   * options.delay: wait this many ms before showing (scrub uses 1000 so a
+   * fast step never flashes the banner).
    */
-  function setBusy(message, reason) {
+  function setBusy(message, reason, options) {
     var key = reason || "tiles";
     if (key !== "tiles") {
       return;
@@ -131,7 +137,16 @@
       return;
     }
     busyReasons.tiles = next;
-    scheduleBusyShow();
+    var delayMs = options && options.delay;
+    var el = busyEl();
+    // Dash may already be showing "Updating map…". Switch the label now
+    // rather than hiding, then waiting 220ms to show tiles.
+    if (delayMs == null && el && !el.classList.contains("is-hidden")) {
+      busyVisible = true;
+      showBusyNow();
+      return;
+    }
+    scheduleBusyShow(delayMs);
   }
 
   function clearBusy(reason) {
@@ -493,10 +508,11 @@
    * Called from a clientside Dash callback on slider change so tile requests
    * start before Python confirms the step.
    */
-  function applyLeadtimeIndex(lead) {
+  function applyLeadtimeIndex(lead, options) {
     if (lead == null || !lastState) {
       return false;
     }
+    var playing = !!(options && options.playing);
     var nextLead = Number(lead);
     var layers = layersFromLeadtimeCogUrls(lastState.leadtimeCogUrls, nextLead);
     if (!layers.length) {
@@ -521,16 +537,22 @@
       layers: layers,
       lead: nextLead,
     });
+    // Same contract on OpenLayers and Cesium. Play does not show a banner.
+    // Scrub shows "Loading tiles…" if the step is still waiting after 1s,
+    // and keeps it until those tiles have painted.
+    var leadOpts = {
+      holdUntilReady: holdUntilReady,
+      waitForTiles: !playing,
+    };
+    if (!playing) {
+      setBusy("Loading tiles…", "tiles", { delay: SCRUB_BUSY_DELAY_MS });
+    }
     if (
       activeEngine === "openlayers" &&
       global.ForecastMapOpenLayers &&
       typeof global.ForecastMapOpenLayers.applyLeadtime === "function"
     ) {
-      // The renderer reports readiness itself; play pacing then waits on
-      // hasPendingSwap rather than on this frame.
-      global.ForecastMapOpenLayers.applyLeadtime(layers, {
-        holdUntilReady: holdUntilReady,
-      });
+      global.ForecastMapOpenLayers.applyLeadtime(layers, leadOpts);
       schedulePrefetch(lastState);
       return true;
     }
@@ -539,10 +561,7 @@
       global.ForecastMapCesium &&
       typeof global.ForecastMapCesium.applyLeadtime === "function"
     ) {
-      // Keep the previous forecast painted until the new imagery is ready.
-      global.ForecastMapCesium.applyLeadtime(layers, {
-        holdUntilReady: holdUntilReady,
-      });
+      global.ForecastMapCesium.applyLeadtime(layers, leadOpts);
       schedulePrefetch(lastState);
       return true;
     }
@@ -736,7 +755,13 @@
     // New frame: block play until the renderer calls setTilesReady(true).
     // Leaflet has no shared load hook here - treat as ready after apply.
     // Soft-swap rebuilds own the banner; scrub never calls this path.
-    if (layers.length && engine !== "leaflet_legacy") {
+    // A view-mode switch publishes empty overlays until Python rebuilds
+    // URLs; keep "Loading tiles…" up through that gap.
+    var modeChanged =
+      previous &&
+      ((previous.engine || "openlayers") !== engine ||
+        (previous.mode || "") !== (state.mode || ""));
+    if (engine !== "leaflet_legacy" && (layers.length || modeChanged)) {
       setTilesReady(false);
       setBusy("Loading tiles…", "tiles");
     } else {

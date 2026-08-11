@@ -18,6 +18,7 @@
   var basemapUrl = null;
   var applyGeneration = 0;
   var progressListener = null;
+  var tilesWaitCleanup = null;
   // Height above ellipsoid that frames the whole Earth in a typical map pane.
   var FULL_GLOBE_HEIGHT_M = 2.4e7;
   // WebMercator meters/pixel at zoom 0 on the equator (EPSG:3857).
@@ -555,6 +556,7 @@
    */
   function beginSmoothSwap(layerId, layerDesc, options) {
     var holdUntilReady = !!(options && options.holdUntilReady);
+    var waitForPaint = !!(options && options.waitForPaint);
     var targetUrl = layerDesc.tileUrl;
     var targetOpacity = layerDesc.opacity == null ? 1 : layerDesc.opacity;
     var existingPending = pendingById[layerId];
@@ -646,23 +648,27 @@
     );
     viewer.scene.requestRender();
 
-    // Cached tiles may never bump the load counter; promote after idle frames.
-    requestAnimationFrame(function () {
-      if (!pendingById[layerId] || pendingById[layerId].generation !== generation) {
-        return;
-      }
+    // Play: cached frames may never bump the globe load counter.
+    // Scrub/rebuilds wait for a real load so the banner stays until
+    // forecast imagery has painted, not just terrain.
+    if (!holdUntilReady && !waitForPaint) {
       requestAnimationFrame(function () {
-        if (
-          !pendingById[layerId] ||
-          pendingById[layerId].generation !== generation
-        ) {
+        if (!pendingById[layerId] || pendingById[layerId].generation !== generation) {
           return;
         }
-        if (viewer.scene.globe.tilesLoaded && !sawLoading) {
-          finish();
-        }
+        requestAnimationFrame(function () {
+          if (
+            !pendingById[layerId] ||
+            pendingById[layerId].generation !== generation
+          ) {
+            return;
+          }
+          if (viewer.scene.globe.tilesLoaded && !sawLoading) {
+            finish();
+          }
+        });
       });
-    });
+    }
     entry.timeout = setTimeout(finish, holdUntilReady ? 2000 : 1500);
   }
 
@@ -676,6 +682,7 @@
     }
     var smooth = !!(options && options.smooth);
     var holdUntilReady = !!(options && options.holdUntilReady);
+    var waitForPaint = !!(options && options.waitForPaint);
     var nextIds = {};
     var i;
     var layer;
@@ -706,6 +713,7 @@
         if (smooth) {
           beginSmoothSwap(layer.id, layer, {
             holdUntilReady: holdUntilReady,
+            waitForPaint: waitForPaint,
           });
           continue;
         }
@@ -782,52 +790,87 @@
   }
 
   function waitForTiles(generation) {
+    if (tilesWaitCleanup) {
+      tilesWaitCleanup();
+    }
     if (!viewer) {
       markTilesReady(generation);
       return;
     }
-    if (progressListener) {
-      viewer.scene.globe.tileLoadProgressEvent.removeEventListener(progressListener);
-      progressListener = null;
-    }
+    // Ignore terrain idle from the previous frame. After a short warmup,
+    // wait until the queue has gone busy and then quiet again.
+    var remainingNow = 0;
+    var watching = false;
+    var saw = false;
+    var idleTimer = null;
+    var warmupTimer = null;
+    var safetyTimer = null;
 
-    function tryReady() {
-      if (generation !== applyGeneration) {
-        return;
-      }
-      if (hasPendingSwap()) {
-        return;
-      }
-      if (!viewer.scene.globe.tilesLoaded) {
-        return;
-      }
-      if (progressListener) {
+    function cleanup() {
+      if (progressListener && viewer) {
         viewer.scene.globe.tileLoadProgressEvent.removeEventListener(
           progressListener
         );
-        progressListener = null;
       }
+      progressListener = null;
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+      }
+      if (warmupTimer) {
+        clearTimeout(warmupTimer);
+      }
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+      }
+      tilesWaitCleanup = null;
+    }
+
+    function finish() {
+      if (generation !== applyGeneration) {
+        cleanup();
+        return;
+      }
+      cleanup();
       markTilesReady(generation);
     }
 
-    // Already idle (cached tiles / empty queue / no soft-swap in flight).
-    if (viewer.scene.globe.tilesLoaded && !hasPendingSwap()) {
-      markTilesReady(generation);
-      return;
-    }
     progressListener = function (remaining) {
       if (generation !== applyGeneration) {
+        cleanup();
+        return;
+      }
+      remainingNow = remaining;
+      if (!watching) {
         return;
       }
       if (remaining > 0) {
+        saw = true;
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
         return;
       }
-      tryReady();
+      if (saw) {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+        }
+        idleTimer = setTimeout(finish, 300);
+      }
     };
     viewer.scene.globe.tileLoadProgressEvent.addEventListener(progressListener);
     viewer.scene.requestRender();
-    // Soft-swaps finish on their own timeout; re-check then too.
-    setTimeout(tryReady, 2100);
+
+    warmupTimer = setTimeout(function () {
+      watching = true;
+      if (remainingNow > 0) {
+        saw = true;
+        return;
+      }
+      finish();
+    }, 800);
+    safetyTimer = setTimeout(finish, 30000);
+    tilesWaitCleanup = cleanup;
   }
 
   /**
@@ -950,10 +993,9 @@
   /**
    * Swap forecast imagery URLs for a leadtime step without rebuilding the viewer.
    *
-   * Scrub/play mark ready immediately so timeline pacing matches OpenLayers;
-   * play then waits on hasPendingSwap while the old frame stays painted.
-   * Date / variable rebuilds can pass waitForTiles to keep the busy banner
-   * until the globe reports an idle tile queue.
+   * Play paces on hasPendingSwap and does not wait here. Scrub and
+   * rebuilds pass waitForTiles so "Loading tiles…" stays until imagery
+   * has settled.
    *
    * @param {Array} layers
    * @param {{holdUntilReady?: boolean, waitForTiles?: boolean}} [options]
@@ -975,6 +1017,7 @@
     syncLayers(layers || [], {
       smooth: true,
       holdUntilReady: holdUntilReady,
+      waitForPaint: waitForPaint,
     });
     viewer.scene.requestRender();
     if (waitForPaint) {
@@ -1008,9 +1051,9 @@
     }
     if (state.layers && state.layers.length) {
       waitForTiles(generation);
-    } else {
-      markTilesReady(generation);
     }
+    // Empty overlays (view-mode switch): ForecastMap keeps the tiles wait
+    // until Python publishes the new URLs. Do not clear it here.
   }
 
   global.ForecastMapCesium = {

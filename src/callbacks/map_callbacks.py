@@ -479,7 +479,7 @@ def register_callbacks(app: dash.Dash):
                 return [nu, nu];
             }
             if (trig === "map-view-mode") {
-                return [nu, nu];
+                return ["forecast-busy", "Updating map…"];
             }
             if (trig === "colorbar-range-reset") {
                 return ["forecast-busy", "Updating colour range…"];
@@ -686,7 +686,9 @@ def register_callbacks(app: dash.Dash):
             var nu = window.dash_clientside.no_update;
             if (window.ForecastMap
                     && typeof window.ForecastMap.applyLeadtimeIndex === "function") {
-                window.ForecastMap.applyLeadtimeIndex(lead);
+                window.ForecastMap.applyLeadtimeIndex(lead, {
+                    playing: !!playing,
+                });
             }
             if (window.__leadtimeConfirmTimer) {
                 clearTimeout(window.__leadtimeConfirmTimer);

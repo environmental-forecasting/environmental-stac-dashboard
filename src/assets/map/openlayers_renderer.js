@@ -30,6 +30,7 @@
   // Overlays added while size was 0 need a source refresh once layout runs.
   var overlaysAwaitingSize = false;
   var applyGeneration = 0;
+  var tilesWaitCleanup = null;
   // Polar / custom EPSG: click rotates so geographic north is screen-up.
   var northUpClickEnabled = false;
   // Continuous lock: re-apply north-up at the view centre while panning.
@@ -957,33 +958,84 @@
   }
 
   function waitForTiles(generation) {
+    if (tilesWaitCleanup) {
+      tilesWaitCleanup();
+    }
     if (!map) {
       markTilesReady(generation);
       return;
     }
-    // Defer one frame so the new XYZ sources can queue tile requests before
-    // we arm rendercomplete (avoids an immediate "idle" complete).
-    requestAnimationFrame(function () {
-      if (generation !== applyGeneration) {
+    // Ignore rendercomplete until a forecast tile event has fired, so an
+    // idle frame before XYZ requests start cannot clear the banner.
+    var saw = false;
+    var attached = [];
+    var cachedTimer = null;
+    var safetyTimer = null;
+
+    function onTile() {
+      saw = true;
+    }
+
+    function attach(source) {
+      if (!source || attached.indexOf(source) >= 0) {
         return;
       }
-      var attempts = 0;
-      function tryReady() {
-        if (generation !== applyGeneration) {
-          return;
-        }
-        // Held swaps stay pending until their incoming tiles have loaded.
-        if (hasPendingSwap() && attempts < 60) {
-          attempts += 1;
-          map.once("rendercomplete", tryReady);
-          map.render();
-          return;
-        }
-        markTilesReady(generation);
-      }
-      map.once("rendercomplete", tryReady);
-      map.render();
+      attached.push(source);
+      source.on("tileloadstart", onTile);
+      source.on("tileloadend", onTile);
+      source.on("tileloaderror", onTile);
+    }
+
+    Object.keys(forecastLayersById).forEach(function (id) {
+      var layer = forecastLayersById[id];
+      attach(layer && layer.getSource && layer.getSource());
     });
+    Object.keys(pendingById).forEach(function (id) {
+      attach(pendingById[id] && pendingById[id].source);
+    });
+
+    function cleanup() {
+      attached.forEach(function (source) {
+        source.un("tileloadstart", onTile);
+        source.un("tileloadend", onTile);
+        source.un("tileloaderror", onTile);
+      });
+      if (map) {
+        map.un("rendercomplete", onRender);
+      }
+      if (cachedTimer) {
+        clearTimeout(cachedTimer);
+      }
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+      }
+      tilesWaitCleanup = null;
+    }
+
+    function finish() {
+      if (generation !== applyGeneration) {
+        cleanup();
+        return;
+      }
+      cleanup();
+      markTilesReady(generation);
+    }
+
+    function onRender() {
+      if (saw) {
+        finish();
+      }
+    }
+
+    tilesWaitCleanup = cleanup;
+    map.on("rendercomplete", onRender);
+    map.render();
+    cachedTimer = setTimeout(function () {
+      if (!saw) {
+        finish();
+      }
+    }, 800);
+    safetyTimer = setTimeout(finish, 30000);
   }
 
   /**
@@ -1042,7 +1094,11 @@
       // Leadtime / style / TMS confirmation: swap overlays only.
       setBasemap(state.basemap, state.view && state.view.showBasemap);
       syncLayers(state.layers, { smooth: true });
-      markTilesReady(generation);
+      if (state.layers && state.layers.length) {
+        waitForTiles(generation);
+      } else {
+        markTilesReady(generation);
+      }
       return;
     }
     applyView(state.view);
