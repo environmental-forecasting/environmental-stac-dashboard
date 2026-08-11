@@ -313,17 +313,20 @@ class STAC:
         Requires ``forecast:reference_time`` and exactly one
         ``forecast:leadtime_length`` value so each init can get an end date
         without listing Items. Does not fetch the Collection from the API.
+
+        Reads lists via ``get_list`` rather than ``to_dict``. pystac
+        ``to_dict`` drops any summary list of 25 or more values, which would
+        force a full Item Search once a collection has that many inits.
         """
         summaries = collection.summaries
         if summaries is None or summaries.is_empty():
             return None
 
-        summary_dict = summaries.to_dict()
-        reference_times = summary_dict.get("forecast:reference_time") or []
+        reference_times = summaries.get_list("forecast:reference_time") or []
         if not isinstance(reference_times, list) or not reference_times:
             return None
 
-        leadtime_values = summary_dict.get("forecast:leadtime_length") or []
+        leadtime_values = summaries.get_list("forecast:leadtime_length") or []
         if not isinstance(leadtime_values, list):
             leadtime_values = [leadtime_values]
 
