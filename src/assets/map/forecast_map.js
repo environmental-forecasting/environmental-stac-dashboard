@@ -577,7 +577,9 @@
     // and keeps it until those tiles have painted.
     var leadOpts = {
       holdUntilReady: holdUntilReady,
-      waitForTiles: !playing,
+      // Cesium play must wait for the globe queue; OpenLayers play uses
+      // hasPendingSwap so a missed rendercomplete cannot stall it.
+      waitForTiles: !playing || activeEngine === "cesium",
     };
     if (!playing) {
       setBusy("Loading tiles…", "tiles", { delay: SCRUB_BUSY_DELAY_MS });

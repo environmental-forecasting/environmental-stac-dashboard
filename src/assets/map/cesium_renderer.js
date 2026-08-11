@@ -510,7 +510,14 @@
   }
 
   function hasPendingSwap() {
-    return Object.keys(pendingById).length > 0;
+    if (Object.keys(pendingById).length > 0) {
+      return true;
+    }
+    var host = getHost();
+    if (!viewer || !host || host.classList.contains("forecast-map-host--hidden")) {
+      return false;
+    }
+    return !viewer.scene.globe.tilesLoaded;
   }
 
   function cancelPending(layerId) {
