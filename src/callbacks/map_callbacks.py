@@ -39,9 +39,7 @@ from map import (
     MapEngine,
     MapViewMode,
     basemap_descriptor,
-    build_map_request,
     build_map_state,
-    resolve_live_colormap,
     initial_map_state,
     list_basemap_options,
     list_view_mode_options,
@@ -236,7 +234,7 @@ def register_callbacks(app: dash.Dash):
     # "Loading tiles…" lives in ForecastMap.applyState after map-state lands.
     app.clientside_callback(
         """
-        function(collections, date, variable, colormap, confirm, mode, resetClicks, style) {
+        function(collections, date, variable, colormap, mode, resetClicks, style) {
             var nu = window.dash_clientside.no_update;
             var trig = window.dash_clientside.callback_context.triggered_id;
             if (!trig) {
@@ -245,14 +243,6 @@ def register_callbacks(app: dash.Dash):
             // Locked colormap / style-only edits apply clientside - no wait.
             if (trig === "colormap-dropdown" && style && style.locked) {
                 return [nu, nu];
-            }
-            // Routine leadtime confirms soft-swap in the browser; only forced
-            // rebuilds (Auto / first paint) should show a map wait.
-            if (trig === "leadtime-confirm") {
-                if (!(confirm && confirm.force)) {
-                    return [nu, nu];
-                }
-                return ["forecast-busy", "Updating map…"];
             }
             // Collection / date STAC waits are separate Outputs below.
             if (trig === "collections-dropdown" || trig === "forecast-init-date-picker") {
@@ -273,7 +263,6 @@ def register_callbacks(app: dash.Dash):
         Input("forecast-init-date-picker", "value"),
         Input("variable-dropdown", "value"),
         Input("colormap-dropdown", "value"),
-        Input("leadtime-confirm", "data"),
         Input("map-view-mode", "value"),
         Input("colorbar-range-reset", "n_clicks"),
         State("display-style", "data"),
@@ -501,76 +490,23 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_call=True,
     )
 
-    # Swap overlay URLs straight from the published leadtimeCogUrls cache, then
-    # ask Python to confirm once scrubbing settles. Playback never confirms:
-    # the browser owns every frame until the user pauses.
+    # Swap overlay URLs from the leadtimeCogUrls cache. Playback never
+    # round-trips to Python; the browser owns every frame.
     app.clientside_callback(
         """
         function(lead, playing) {
-            var nu = window.dash_clientside.no_update;
             if (window.ForecastMap
                     && typeof window.ForecastMap.applyLeadtimeIndex === "function") {
                 window.ForecastMap.applyLeadtimeIndex(lead, {
                     playing: !!playing,
                 });
             }
-            if (window.__leadtimeConfirmTimer) {
-                clearTimeout(window.__leadtimeConfirmTimer);
-                window.__leadtimeConfirmTimer = null;
-            }
-            if (playing) {
-                return nu;
-            }
-            // Without a cache the first paint still comes from Python, which
-            // the date / variable / collection inputs already trigger.
-            if (!window.ForecastMap
-                    || typeof window.ForecastMap.hasLeadtimeCogUrls !== "function"
-                    || !window.ForecastMap.hasLeadtimeCogUrls()) {
-                return nu;
-            }
-            var leadValue = lead;
-            window.__leadtimeConfirmTimer = setTimeout(function () {
-                window.__leadtimeConfirmTimer = null;
-                window.dash_clientside.set_props("leadtime-confirm", {
-                    data: {lead: leadValue, ts: Date.now()},
-                });
-            }, 350);
-            return nu;
+            return window.dash_clientside.no_update;
         }
         """,
         Output("map-bridge-tick", "data", allow_duplicate=True),
         Input("leadtime-slider", "value"),
         State("leadtime-playing", "data"),
-        prevent_initial_call=True,
-    )
-
-    # Pausing leaves the slider where playback stopped, so confirm that step
-    # right away instead of waiting for another scrub.
-    app.clientside_callback(
-        """
-        function(playing, lead) {
-            var nu = window.dash_clientside.no_update;
-            if (playing) {
-                return nu;
-            }
-            if (!window.ForecastMap
-                    || typeof window.ForecastMap.hasLeadtimeCogUrls !== "function"
-                    || !window.ForecastMap.hasLeadtimeCogUrls()) {
-                return nu;
-            }
-            if (window.__leadtimeConfirmTimer) {
-                clearTimeout(window.__leadtimeConfirmTimer);
-                window.__leadtimeConfirmTimer = null;
-            }
-            window.dash_clientside.set_props("leadtime-confirm", {
-                data: {lead: lead, ts: Date.now()},
-            });
-            return nu;
-        }
-        """,
-        Output("map-bridge-tick", "data", allow_duplicate=True),
-        Input("leadtime-playing", "data"),
-        State("leadtime-slider", "value"),
         prevent_initial_call=True,
     )
 
@@ -1154,92 +1090,6 @@ def register_callbacks(app: dash.Dash):
         )
 
     @app.callback(
-        Output("map-request", "data"),
-        Input("leadtime-confirm", "data"),
-        State("colormap-dropdown", "value"),
-        State("display-style", "data"),
-        State("map-request", "data"),
-        State("leadtime-slider", "value"),
-        State("map-view-mode", "value"),
-        prevent_initial_call=True,
-    )
-    def publish_map_request(
-        leadtime_confirm,
-        colormap,
-        display_style,
-        previous_request,
-        leadtime_slider,
-        map_view_mode,
-    ):
-        """Record the settled leadtime on ``map-request`` (Reset still clears it)."""
-        prev = previous_request if isinstance(previous_request, dict) else None
-        if not prev or not isinstance(leadtime_confirm, dict):
-            raise PreventUpdate
-        if leadtime_confirm.get("lead") is not None:
-            lead = leadtime_confirm["lead"]
-        else:
-            lead = (
-                leadtime_slider
-                if leadtime_slider is not None
-                else prev.get("lead", 0)
-            )
-        style_cmap = normalise_display_style(display_style).get("colormap")
-        return build_map_request(
-            prev,
-            collection=prev["collection"],
-            forecast_start=prev["forecast_start"],
-            variable=prev["variable"],
-            colormap=resolve_live_colormap(
-                colormap,
-                style_cmap,
-                prev.get("colormap"),
-            ),
-            view_mode=map_view_mode or prev.get("view_mode"),
-            lead=lead,
-            force_stats=False,
-            clear_lock=False,
-            leadtime_only=not bool(leadtime_confirm.get("force")),
-        )
-
-    @app.callback(
-        Output("map-state", "data"),
-        Output("cog-results-layer", "children"),
-        Output("display-style", "data"),
-        Output("map-view-mode", "value"),
-        Input("map-request", "data"),
-        State("map-state", "data"),
-        prevent_initial_call=True,
-    )
-    def update_cog_layer(
-        map_request,
-        map_state,
-    ):
-        """
-        Clear overlays when ``map-request`` is cleared.
-
-        Item tiles are painted in the browser from ``/api/search``. This
-        callback must not load the same Item or overwrite ``map-state``.
-        """
-        if not isinstance(map_request, dict):
-            if not (map_state or {}).get("layers"):
-                raise PreventUpdate
-            logging.debug("map-request cleared; removing overlays")
-            cleared = build_map_state(
-                previous=map_state,
-                engine=(map_state or {}).get("engine")
-                or MapEngine.OPENLAYERS.value,
-                mode=(map_state or {}).get("mode")
-                or MapViewMode.GLOBAL_3857.value,
-                layers=[],
-                view=(map_state or {}).get("view"),
-                leadtime_cog_urls=None,
-                lead=None,
-            )
-            return cleared, [], no_update, no_update
-
-        return no_update, no_update, no_update, no_update
-
-    @app.callback(
         Output("map-state", "data", allow_duplicate=True),
         Output("cog-results-layer", "children", allow_duplicate=True),
         Input("display-style", "data"),
@@ -1413,7 +1263,6 @@ def register_callbacks(app: dash.Dash):
         Output("map-view-mode", "value", allow_duplicate=True),
         Output("basemap-style", "value", allow_duplicate=True),
         Output("display-style", "data", allow_duplicate=True),
-        Output("map-request", "data", allow_duplicate=True),
         Output("map-state", "data", allow_duplicate=True),
         Output("map-base-layer", "url", allow_duplicate=True),
         Output("map-base-layer", "attribution", allow_duplicate=True),
@@ -1434,7 +1283,6 @@ def register_callbacks(app: dash.Dash):
             DEFAULT_VIEW_MODE,
             DEFAULT_BASEMAP_ID,
             dict(DEFAULT_DISPLAY_STYLE),
-            None,
             initial_map_state(),
             factory_basemap["url"],
             factory_basemap["attribution"],
@@ -1510,8 +1358,7 @@ def register_callbacks(app: dash.Dash):
         return style, {"ts": time.time()}
 
     # Typing a fixed min/max, or picking a colormap while locked, pins the
-    # colour range. publish_map_request skips locked colormap edits; the
-    # apply_locked_display_style Python callback rewrites tile URLs.
+    # colour range. apply_locked_display_style rewrites tile URLs.
     app.clientside_callback(
         """
         function(colormap, vmin, vmax, style) {

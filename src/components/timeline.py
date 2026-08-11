@@ -218,9 +218,6 @@ timeline_bar = html.Div(
         dcc.Store(id="leadtime-axis", data=None),
         dcc.Store(id="leadtime-bounds", data={"min": 0, "max": 0}),
         dcc.Store(id="leadtime-keys-bound", data=False),
-        # Debounced leadtime the browser asks Python to confirm once scrubbing
-        # settles: {"lead": int, "ts": float, "force": bool}.
-        dcc.Store(id="leadtime-confirm", data=None),
         dcc.Store(id="map-style-refresh", data=None),
     ],
     id="time-slider-div",

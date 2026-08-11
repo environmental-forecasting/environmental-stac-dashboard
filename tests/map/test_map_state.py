@@ -101,7 +101,10 @@ def test_build_map_state_includes_leadtime_cog_urls_and_lead():
         "rescale": [0.0, 1.0],
         "bidx": 1,
         "collections": {
-            "demo": {"hrefs": ["file:///data/a.tif", "file:///data/b.tif"]}
+            "demo": {
+                "hrefs": ["2026-07-19T00:00:00Z", "2026-07-20T00:00:00Z"],
+                "itemId": "forecast-init-demo",
+            }
         },
     }
     changed = build_map_state(

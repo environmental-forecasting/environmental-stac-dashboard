@@ -12,21 +12,18 @@ sys.path.insert(0, str(SRC_DIR))
 from map.projections import (  # noqa: E402
     WEB_MERCATOR_QUAD,
     MapViewMode,
-    bbox_fits_view_mode,
     epsg_code_for_mode,
     label_for_view_mode,
     list_view_mode_options,
     list_view_mode_presets,
     normalise_view_mode,
     proj4_for_epsg,
-    resolve_mode_and_engine,
     resolve_engine_for_mode,
     resolve_view_mode,
     tile_matrix_set_for_mode,
     view_hint_for_mode,
     view_mode_and_hint,
 )
-from map.tile_urls import build_item_tile_url  # noqa: E402
 from map.tms_client import (  # noqa: E402
     clear_tile_grid_cache,
     get_tile_grid,
@@ -190,18 +187,6 @@ def test_view_mode_and_hint_uses_tiler_grid_when_available():
     assert hint["resolutions"][0] == grid["resolutions"][0]
 
 
-def test_bbox_fits_view_mode_by_hemisphere():
-    arctic = [-180, 50, 180, 90]
-    antarctic = [-180, -90, 180, -50]
-    assert bbox_fits_view_mode(arctic, "EPSG6931")
-    assert not bbox_fits_view_mode(antarctic, "EPSG6931")
-    assert bbox_fits_view_mode(antarctic, "EPSG6932")
-    assert not bbox_fits_view_mode(arctic, "EPSG6932")
-    assert bbox_fits_view_mode(arctic, MapViewMode.GLOBAL_3857)
-    # Unknown custom EPSG: no hemisphere filter.
-    assert bbox_fits_view_mode(antarctic, "EPSG3031")
-
-
 def test_resolve_engine_for_modes():
     assert resolve_engine_for_mode("EPSG6931") == "openlayers"
     assert resolve_engine_for_mode("globe_cesium") == "cesium"
@@ -209,52 +194,9 @@ def test_resolve_engine_for_modes():
     assert resolve_engine_for_mode("global_leaflet") == "leaflet_legacy"
 
 
-def test_resolve_mode_and_engine_derives_engine_from_mode():
-    assert resolve_mode_and_engine("globe_cesium") == ("globe_cesium", "cesium")
-    assert resolve_mode_and_engine("global_3857") == ("global_3857", "openlayers")
-    assert resolve_mode_and_engine("global_leaflet") == (
-        "global_leaflet",
-        "leaflet_legacy",
-    )
-    assert resolve_mode_and_engine("EPSG6931") == ("EPSG6931", "openlayers")
-
-
 def test_unknown_mode_raises():
     with pytest.raises(ValueError):
         tile_matrix_set_for_mode("not_a_mode")
-
-
-def test_build_item_tile_url_keeps_xyz_placeholders():
-    url = build_item_tile_url(
-        tiler_base="http://localhost:8002",
-        tile_matrix_set=WEB_MERCATOR_QUAD,
-        collection_id="demo",
-        item_id="forecast-init",
-        asset_key="2026-07-19T00:00:00Z",
-    )
-    assert url.startswith(
-        "http://localhost:8002/collections/demo/items/forecast-init"
-        "/tiles/WebMercatorQuad/{z}/{x}/{y}.webp?assets="
-    )
-    assert "2026-07-19T00%3A00%3A00Z" in url
-    assert "/cog/tiles/" not in url
-
-
-def test_build_item_tile_url_appends_style_query_params():
-    url = build_item_tile_url(
-        tiler_base="http://tiler",
-        tile_matrix_set="EPSG6931",
-        collection_id="demo",
-        item_id="forecast-init",
-        asset_key="2026-07-19T00:00:00Z",
-        colormap="blues_r",
-        rescale=(0.0, 1.0),
-        band_index=2,
-    )
-    assert "/collections/demo/items/forecast-init/tiles/EPSG6931/" in url
-    assert "assets=2026-07-19T00%3A00%3A00Z%7Cbidx%3D2" in url
-    assert "colormap_name=blues_r" in url
-    assert "rescale=0.0,1.0" in url
 
 
 def test_list_view_mode_presets_includes_polar_grid(monkeypatch):

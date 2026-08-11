@@ -1,41 +1,7 @@
-"""Build browser-facing titiler-pgstac Item tile URLs."""
+"""Rewrite colour-bar query params on titiler-pgstac Item tile URLs."""
 
 import re
 from typing import Any
-from urllib.parse import quote
-
-
-def build_item_tile_url(
-    *,
-    tiler_base: str,
-    tile_matrix_set: str,
-    collection_id: str,
-    item_id: str,
-    asset_key: str,
-    colormap: str | None = None,
-    rescale: tuple[float, float] | list[float] | None = None,
-    band_index: int | None = None,
-) -> str:
-    """
-    Build an XYZ template for a titiler-pgstac Item tile.
-
-    titiler-pgstac 3.0 selects the COG with ``assets={key}|bidx={n}``.
-    Scrubbing changes ``assets=`` only; style stays on the query string.
-    """
-    assets = quote(asset_key, safe="")
-    if band_index is not None:
-        assets = quote(f"{asset_key}|bidx={band_index}", safe="")
-    tile_url = (
-        f"{tiler_base.rstrip('/')}/collections/{quote(collection_id, safe='')}"
-        f"/items/{quote(item_id, safe='')}"
-        f"/tiles/{tile_matrix_set}/{{z}}/{{x}}/{{y}}.webp?assets={assets}"
-    )
-    if colormap:
-        tile_url += f"&colormap_name={colormap}"
-    if rescale is not None:
-        min_val, max_val = rescale[0], rescale[1]
-        tile_url += f"&rescale={min_val},{max_val}"
-    return tile_url
 
 
 def rewrite_tile_url_style(

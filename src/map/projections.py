@@ -21,10 +21,6 @@ _TMS_LABELS: dict[str, str] = {
     "EPSG6932": "Antarctic",
 }
 
-# Hemisphere fitness for known polar EPSG codes (centre latitude sign).
-_ARCTIC_EPSG_CODES = frozenset({6931})
-_ANTARCTIC_EPSG_CODES = frozenset({6932})
-
 
 class MapViewMode(StrEnum):
     """Fixed product view modes (not discovered from TiTiler)."""
@@ -208,7 +204,7 @@ def list_view_mode_presets(tiler_url: str) -> dict[str, dict[str, Any]]:
     Build ``{mode: view_hint}`` presets for optimistic client-side switches.
 
     Polar modes include TiTiler tile-grid hints so the browser can change
-    projection without waiting for ``update_cog_layer``.
+    projection without waiting on Python.
 
     Args:
         tiler_url: TiTiler base URL used to resolve custom TMS grids.
@@ -359,61 +355,3 @@ def resolve_engine_for_mode(mode: str) -> str:
     if view_mode == MapViewMode.GLOBAL_LEAFLET.value:
         return MapEngine.LEAFLET_LEGACY.value
     return MapEngine.OPENLAYERS.value
-
-
-def resolve_mode_and_engine(mode: str | None) -> tuple[str, str]:
-    """
-    Pick a view mode and its matching map engine.
-
-    Args:
-        mode: Requested view mode id.
-
-    Returns:
-        ``(resolved_mode, resolved_engine)`` before TiTiler TMS fallback.
-    """
-    view_mode = normalise_view_mode(mode)
-    return view_mode, resolve_engine_for_mode(view_mode)
-
-
-def bbox_fits_view_mode(bbox, mode: str) -> bool:
-    """
-    Return whether a WGS84 bbox centre belongs in the given map view.
-
-    Known Arctic / Antarctic EPSG codes filter by hemisphere. Other custom
-    TMS modes do not filter (all collections are shown).
-
-    Args:
-        bbox: Bounding box as ``[west, south, east, north, ...]``.
-        mode: View mode id.
-
-    Returns:
-        True if the bbox should be drawn in this mode. Malformed bboxes fit.
-    """
-    view_mode = normalise_view_mode(mode)
-    if view_mode in (
-        MapViewMode.GLOBAL_3857.value,
-        MapViewMode.GLOBE_CESIUM.value,
-    ):
-        return True
-    if bbox is None or len(bbox) < 4:
-        return True
-
-    try:
-        epsg = epsg_code_for_mode(view_mode)
-    except ValueError:
-        return True
-
-    if epsg not in _ARCTIC_EPSG_CODES and epsg not in _ANTARCTIC_EPSG_CODES:
-        return True
-
-    _west, south, _east, north = bbox[:4]
-    try:
-        centre_lat = (float(south) + float(north)) / 2.0
-    except (TypeError, ValueError):
-        return True
-
-    if epsg in _ARCTIC_EPSG_CODES:
-        return centre_lat > 0
-    if epsg in _ANTARCTIC_EPSG_CODES:
-        return centre_lat < 0
-    return True

@@ -370,14 +370,6 @@
     );
   }
 
-  /** Drop the cache so a stale forecast cannot be swapped in. */
-  function clearLeadtimeCogUrls() {
-    if (!lastState) {
-      return;
-    }
-    lastState = Object.assign({}, lastState, { leadtimeCogUrls: null });
-  }
-
   function activePrefetchFn() {
     if (
       activeEngine === "openlayers" &&
@@ -2511,7 +2503,6 @@
     applyLeadtimeIndex: applyLeadtimeIndex,
     layersFromLeadtimeCogUrls: layersFromLeadtimeCogUrls,
     hasLeadtimeCogUrls: hasLeadtimeCogUrls,
-    clearLeadtimeCogUrls: clearLeadtimeCogUrls,
     loadForecast: loadForecast,
     applyBand: applyBand,
     applyStyle: applyStyle,

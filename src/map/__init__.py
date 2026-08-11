@@ -17,7 +17,6 @@ from .projections import (
     WEB_MERCATOR_QUAD,
     MapEngine,
     MapViewMode,
-    bbox_fits_view_mode,
     epsg_code_for_mode,
     is_custom_tms_mode,
     label_for_view_mode,
@@ -25,22 +24,14 @@ from .projections import (
     list_view_mode_presets,
     normalise_view_mode,
     proj4_for_epsg,
-    resolve_mode_and_engine,
     resolve_engine_for_mode,
     resolve_view_mode,
     tile_matrix_set_for_mode,
     view_hint_for_mode,
     view_mode_and_hint,
 )
-from .request import (
-    build_map_request,
-    collections_list,
-    recipe_complete,
-    resolve_live_colormap,
-)
 from .state import build_map_state, default_basemap, initial_map_state
 from .tile_urls import (
-    build_item_tile_url,
     rewrite_layer_entries_style,
     rewrite_tile_url_style,
 )
@@ -61,12 +52,8 @@ __all__ = [
     "MapEngine",
     "MapViewMode",
     "basemap_descriptor",
-    "bbox_fits_view_mode",
-    "build_item_tile_url",
     "build_map_state",
-    "build_map_request",
     "clear_tile_grid_cache",
-    "collections_list",
     "default_basemap",
     "DEFAULT_BASEMAP_ATTRIBUTION",
     "DEFAULT_BASEMAP_ID",
@@ -84,9 +71,6 @@ __all__ = [
     "normalise_view_mode",
     "OSM_XYZ_URL",
     "proj4_for_epsg",
-    "recipe_complete",
-    "resolve_live_colormap",
-    "resolve_mode_and_engine",
     "resolve_engine_for_mode",
     "resolve_view_mode",
     "rewrite_layer_entries_style",

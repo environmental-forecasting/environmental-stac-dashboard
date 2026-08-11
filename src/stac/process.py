@@ -1,20 +1,19 @@
 import logging
 import os
 from datetime import datetime as dt
-from typing import Any, Iterable
+from typing import Any
 
 import diskcache
-from pystac import Asset, Collection, Item, MediaType
-from pystac_client import Client, ItemSearch
+from pystac import Collection
+from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
 from urllib3 import Retry
 
-from .leadtime_axis import leadtime_axis_payload, ordered_cog_assets
 from .timefmt import parse_stac_datetime, to_stac_datetime
 
 logger = logging.getLogger(__name__)
 
-# Cross-process shared cache for STAC Items, bands, inits, and Collections.
+# Cross-process shared cache for STAC Collections and forecast-init lists.
 # Lives on /tmp (tmpfs in Docker) so it is fast and ephemeral across restarts.
 # All gunicorn workers share this store via diskcache's file-locking protocol,
 # so each STAC API round-trip happens at most once across the process group.
@@ -104,59 +103,9 @@ _FORECAST_INIT_FIELDS = {
     "exclude": ["geometry", "bbox", "assets", "links"],
 }
 
-# Variable names sit on each forecast COG as ``forecast:bands``. Ask the
-# API for assets only (no geometry, links, or file URLs) so filling the
-# variables dropdown stays fast.
-_FORECAST_BANDS_FIELDS = {
-    "include": ["id", "assets"],
-    "exclude": [
-        "geometry",
-        "bbox",
-        "links",
-        "assets.*.href",
-        "assets.*.alternate",
-    ],
-}
-
-
-def band_rescale_from_asset(
-    asset: Asset, band_index: int
-) -> tuple[float, float] | None:
-    """
-    Read colour-scale min/max for a band from Item asset metadata.
-
-    Expects ``forecast:bands`` entries with ``STATISTICS_MINIMUM`` and
-    ``STATISTICS_MAXIMUM`` (written at preprocess time). Returns None if
-    those tags are missing so the caller can fall back to TiTiler statistics.
-    """
-    bands = asset.extra_fields.get("forecast:bands") or []
-    for band in bands:
-        if band.get("index") != band_index:
-            continue
-        minimum = band.get("STATISTICS_MINIMUM")
-        maximum = band.get("STATISTICS_MAXIMUM")
-        if minimum is None or maximum is None:
-            return None
-        return float(minimum), float(maximum)
-    return None
-
-
-def _datetime_equals_filter(forecast_reference_time: str) -> dict[str, Any]:
-    """CQL2 filter: Item datetime is exactly this forecast start."""
-    return {
-        "op": "=",
-        "args": [
-            {"property": "datetime"},
-            {"timestamp": forecast_reference_time},
-        ],
-    }
-
-
 class STAC:
-    # Namespace prefixes keep the four logical caches collision-free inside the
+    # Namespace prefixes keep the logical caches collision-free inside the
     # single shared diskcache store.
-    _NS_ITEM = "item"
-    _NS_BANDS = "bands"
     _NS_INITS = "inits"
     _NS_COLL = "coll"
 
@@ -174,7 +123,7 @@ class STAC:
         self._url = STAC_FASTAPI_URL
         self._catalog = Client.open(STAC_FASTAPI_URL, stac_io=stac_api_io)
         # Shared cross-process cache (all gunicorn workers read/write the same
-        # store). Replaces the four per-worker in-memory dicts so a cold STAC
+        # store). Replaces per-worker in-memory dicts so a cold STAC
         # API fetch only happens once regardless of which worker handles the
         # first request for a given key.
         self._cache = _get_shared_cache()
@@ -219,28 +168,6 @@ class STAC:
         expire = _CACHE_TTL_SECONDS or None
         store.set(key, value, expire=expire)
 
-    def _search_collection(self, collection_id) -> ItemSearch:
-        search = self._catalog.search(collections=[collection_id], max_items=None)
-        return search
-
-    def _search_item_at(
-        self,
-        collection_id: str,
-        forecast_reference_time: str,
-        *,
-        fields: dict[str, list[str]] | None = None,
-    ) -> ItemSearch:
-        """Find the one Item that started at this forecast time."""
-        kwargs: dict[str, Any] = {
-            "collections": [collection_id],
-            "filter": _datetime_equals_filter(forecast_reference_time),
-            "filter_lang": "cql2-json",
-            "max_items": 1,
-        }
-        if fields is not None:
-            kwargs["fields"] = fields
-        return self._catalog.search(**kwargs)
-
     def get_catalog_collection_ids(self) -> list[str]:
         """
         Collection ids for the dropdown.
@@ -252,22 +179,6 @@ class STAC:
         search = self._catalog.collection_search(fields=["id"])
         return [col["id"] for col in search.collections_as_dicts() if col.get("id")]
 
-    def cache_collections(self, collections: Iterable[Collection]) -> None:
-        """
-        Keep Collection objects already in hand and prime forecast-init rows.
-
-        Call this after listing collections for the dropdown so
-        ``list_forecast_inits`` can use summaries without a second
-        ``GET /collections/{id}``.
-        """
-        for collection in collections:
-            self._cache_set(self._NS_COLL, collection, collection.id)
-            if self._cache_get(self._NS_INITS, collection.id) is not None:
-                continue
-            inits = self._list_forecast_inits_from_summaries(collection)
-            if inits is not None:
-                self._cache_set(self._NS_INITS, inits, collection.id)
-
     def _get_collection(self, collection_id: str) -> Collection:
         """Return a Collection, reusing one already cached when present."""
         cached = self._cache_get(self._NS_COLL, collection_id)
@@ -276,13 +187,6 @@ class STAC:
         collection = self._catalog.get_collection(collection_id)
         self._cache_set(self._NS_COLL, collection, collection_id)
         return collection
-
-    def get_collection_extents(self, collection_id):
-        collection = self._get_collection(collection_id)
-        logger.debug(f"Collection: {collection}")
-        temporal_extent = collection.extent.temporal.intervals[0]
-        spatial_extent = collection.extent.spatial.bboxes[0]
-        return temporal_extent, spatial_extent
 
     def list_forecast_inits(self, collection_id: str) -> list[dict[str, Any]]:
         """
@@ -457,189 +361,3 @@ class STAC:
                 continue
         return None
 
-    def get_forecast_item(
-        self, collection_id: str, forecast_reference_time: str
-    ) -> Item:
-        """
-        Return the STAC Item for one forecast run.
-
-        Asks the API for the Item whose start time is exactly this forecast
-        start. The result is cached until it expires, so opening the same
-        day again does not hit the API.
-        """
-        cached = self._cache_get(self._NS_ITEM, collection_id, forecast_reference_time)
-        if cached is not None:
-            return cached
-
-        items = list(
-            self._search_item_at(collection_id, forecast_reference_time).items()
-        )
-        if not items:
-            raise ValueError(
-                f"No item found with datetime {forecast_reference_time} "
-                f"in collection {collection_id}."
-            )
-
-        item = items[0]
-        self._cache_set(self._NS_ITEM, item, collection_id, forecast_reference_time)
-        # Filling the variables dropdown can reuse this Item's band list.
-        if self._cache_get(self._NS_BANDS, collection_id, forecast_reference_time) is None:
-            bands = self._bands_from_item(item)
-            if bands:
-                self._cache_set(self._NS_BANDS, bands, collection_id, forecast_reference_time)
-        return item
-
-    def get_item_extents(self, collection_id: str, forecast_reference_time: str):
-        item = self.get_forecast_item(collection_id, forecast_reference_time)
-        item_props = item.properties
-        temporal_extent = (
-            item_props["forecast:reference_time"],
-            item_props["forecast:end_time"],
-        )
-        temporal_extent = [
-            parse_stac_datetime(iso_string) for iso_string in temporal_extent
-        ]
-        # Convert to match datetime like `get_collection_extents`.
-        spatial_extent = item.bbox
-        return temporal_extent, spatial_extent
-
-    def get_item_cogs(self, collection_id: str, forecast_reference_time: str):
-        item = self.get_forecast_item(collection_id, forecast_reference_time)
-        assets = item.get_assets(media_type=MediaType.COG, role="data")
-        # Ascending valid time so lead index matches the scrubber axis.
-        return {
-            key: asset
-            for _valid, key, asset in ordered_cog_assets(assets)
-        }
-
-    def get_leadtime_axis(
-        self, collection_id: str, forecast_reference_time: str
-    ) -> dict:
-        """Ordered valid times and inferred step unit for the lead scrubber."""
-        cogs = self.get_item_cogs(collection_id, forecast_reference_time)
-        return leadtime_axis_payload(cogs)
-
-    def get_asset_band_props(
-        self, collection_id: str, forecast_reference_time: str, asset_id
-    ):
-        item = self.get_forecast_item(collection_id, forecast_reference_time)
-        asset = item.assets.get(asset_id)
-
-        key = "forecast:bands"
-        if asset is not None and key in asset.extra_fields:
-            return asset.extra_fields[key]
-
-        return None
-
-    def get_asset_bands(
-        self, collection_id: str, forecast_reference_time: str, asset_id
-    ) -> dict[str, int]:
-        asset_band_props = self.get_asset_band_props(
-            collection_id, forecast_reference_time, asset_id
-        )
-        bands = {band["name"]: band["index"] for band in asset_band_props}
-        return bands
-
-    @staticmethod
-    def _bands_from_item(item: Item) -> dict[str, int]:
-        """Read variable names and band numbers from a loaded forecast Item."""
-        cogs = item.get_assets(media_type=MediaType.COG, role="data")
-        if not cogs:
-            return {}
-        asset = next(iter(cogs.values()))
-        band_props = asset.extra_fields.get("forecast:bands") or []
-        return {
-            str(band["name"]): int(band["index"])
-            for band in band_props
-            if band.get("name") is not None and band.get("index") is not None
-        }
-
-    @staticmethod
-    def _bands_from_asset_dicts(assets: dict[str, Any]) -> dict[str, int]:
-        """Read variable names and band numbers from a slim search response."""
-        for asset in assets.values():
-            if not isinstance(asset, dict):
-                continue
-            roles = asset.get("roles") or []
-            media = asset.get("type") or asset.get("media_type") or ""
-            is_data = "data" in roles
-            is_cog = "cog" in media.lower() or media == str(MediaType.COG)
-            if not (is_data or is_cog):
-                continue
-            band_props = asset.get("forecast:bands")
-            if not band_props:
-                continue
-            bands: dict[str, int] = {}
-            for band in band_props:
-                name = band.get("name")
-                index = band.get("index")
-                if name is None or index is None:
-                    continue
-                bands[str(name)] = int(index)
-            if bands:
-                return bands
-        return {}
-
-    def list_forecast_bands(
-        self, collection_id: str, forecast_reference_time: str
-    ) -> dict[str, int]:
-        """
-        List the variables available for one forecast run.
-
-        Returns a dict of variable name to band number. Prefers a light
-        catalogue search that skips file URLs and geometry, so the variables
-        dropdown can fill without waiting on a full Item download. Reuses a
-        full Item already held in memory when present.
-        """
-        cached = self._cache_get(self._NS_BANDS, collection_id, forecast_reference_time)
-        if cached is not None:
-            return cached
-
-        item = self._cache_get(self._NS_ITEM, collection_id, forecast_reference_time)
-        if item is not None:
-            bands = self._bands_from_item(item)
-            self._cache_set(self._NS_BANDS, bands, collection_id, forecast_reference_time)
-            return bands
-
-        search = self._search_item_at(
-            collection_id,
-            forecast_reference_time,
-            fields=_FORECAST_BANDS_FIELDS,
-        )
-        for raw in search.items_as_dicts():
-            bands = self._bands_from_asset_dicts(raw.get("assets") or {})
-            if bands:
-                self._cache_set(self._NS_BANDS, bands, collection_id, forecast_reference_time)
-                logger.debug(
-                    "Loaded %s bands for %s @ %s via slim Item Search",
-                    len(bands),
-                    collection_id,
-                    forecast_reference_time,
-                )
-                return bands
-
-        # Search returned nothing useful: load the full Item instead.
-        try:
-            cogs = self.get_item_cogs(collection_id, forecast_reference_time)
-        except ValueError:
-            self._cache_set(self._NS_BANDS, {}, collection_id, forecast_reference_time)
-            return {}
-        if not cogs:
-            self._cache_set(self._NS_BANDS, {}, collection_id, forecast_reference_time)
-            return {}
-        first_id = next(iter(cogs))
-        bands = self.get_asset_bands(
-            collection_id, forecast_reference_time, first_id
-        )
-        self._cache_set(self._NS_BANDS, bands, collection_id, forecast_reference_time)
-        return bands
-
-    def get_band_rescale(
-        self, asset: Asset, band_index: int
-    ) -> tuple[float, float] | None:
-        """
-        Return (min, max) for a COG band from asset metadata, or None.
-
-        When None, callers should fall back to TiTiler ``/cog/statistics``.
-        """
-        return band_rescale_from_asset(asset, band_index)
