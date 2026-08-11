@@ -233,12 +233,16 @@ class STAC:
             kwargs["fields"] = fields
         return self._catalog.search(**kwargs)
 
-    def get_catalog_collection_ids(
-        self, resolve: bool = False
-    ) -> Iterable[Collection] | tuple[Collection]:
-        # Get all available collections in STAC API
-        collections = self._catalog.get_all_collections()
-        return tuple(collections) if resolve else collections
+    def get_catalog_collection_ids(self) -> list[str]:
+        """
+        Collection ids for the dropdown.
+
+        Asks for ``id`` only so first load does not download every init
+        summary. The selected Collection is loaded when the date picker
+        needs it.
+        """
+        search = self._catalog.collection_search(fields=["id"])
+        return [col["id"] for col in search.collections_as_dicts() if col.get("id")]
 
     def cache_collections(self, collections: Iterable[Collection]) -> None:
         """
@@ -281,8 +285,8 @@ class STAC:
         Item Search. Falls back to a slim Item Search when summaries are
         missing or leadtime lengths are not uniform.
 
-        When Collections were already loaded (see ``cache_collections``),
-        summaries are read from that cached object instead of another GET.
+        Fetches the Collection when it is first selected so summaries can
+        fill the date picker. Later calls reuse the cached object.
 
         Results are cached per collection on this client so switching
         selection back and forth does not repeat the API call.

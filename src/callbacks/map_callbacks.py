@@ -377,7 +377,7 @@ def register_callbacks(app: dash.Dash):
     """
 
     # # Get first `collection_id` for testing
-    # collection_id = stac.get_catalog_collection_ids(resolve=True)[0].id
+    # collection_id = stac.get_catalog_collection_ids()[0]
 
     # Publish viewport width on load and whenever the window is resized.
     # Only write when the width changes so leadtime mark density updates
@@ -960,15 +960,14 @@ def register_callbacks(app: dash.Dash):
     )
     def update_collections(_, user_prefs):
         stac = _get_stac_client()
-        collections = stac.get_catalog_collection_ids(resolve=True)
-        # Reuse summaries on these Collection objects for forecast inits
-        # so selecting a collection does not GET /collections/{id} again.
-        stac.cache_collections(collections)
-        options = []
-        for collection in collections:
-            option = {"label": collection.id, "value": collection.id}
-            options.append(option)
-        valid_ids = {collection.id for collection in collections}
+        # Ids only. The selected Collection (with summaries) is loaded
+        # when the date picker asks for forecast inits.
+        collection_ids = stac.get_catalog_collection_ids()
+        options = [
+            {"label": collection_id, "value": collection_id}
+            for collection_id in collection_ids
+        ]
+        valid_ids = set(collection_ids)
         preferred = preferred_collections(user_prefs, valid_ids)
         # None / empty: leave the multi-select cleared (factory / stale prefs).
         value = preferred if preferred else None
