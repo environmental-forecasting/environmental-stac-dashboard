@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-from stac.process import STAC  # noqa: E402
+from stac.process import STAC, _datetime_equals_filter  # noqa: E402
 
 
 def _data_cog_asset(*, bands: list[dict], with_href: bool = True) -> dict:
@@ -75,6 +75,11 @@ def test_list_forecast_bands_uses_slim_search_then_cache():
     stac._catalog.search.assert_called_once()
     call_kwargs = stac._catalog.search.call_args.kwargs
     assert "assets.*.href" in call_kwargs["fields"]["exclude"]
+    assert call_kwargs["filter"] == _datetime_equals_filter("2024-01-01T00:00:00Z")
+    assert call_kwargs["filter_lang"] == "cql2-json"
+    assert "datetime" not in call_kwargs
+    assert "ids" not in call_kwargs
+    assert "query" not in call_kwargs
 
 
 def test_list_forecast_bands_prefers_item_cache():

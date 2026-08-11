@@ -4,8 +4,8 @@ Shared datetime formats for the dashboard.
 Only two string shapes are used on purpose:
 
 - Calendar day (``YYYY-MM-DD``): date picker, store keys, disabled dates, slider maths.
-- STAC datetime (RFC 3339 via pystac ``datetime_to_str``): Item property queries
-  such as ``forecast:reference_time``.
+- STAC datetime (RFC 3339 via pystac ``datetime_to_str``): Item ``datetime``
+  and ``forecast:reference_time``.
 
 Slider mark labels use a short display form derived from each lead's valid
 time, not a third storage format. Valid-time labels adapt to the forecast

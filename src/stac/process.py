@@ -135,6 +135,17 @@ def band_rescale_from_asset(
     return None
 
 
+def _datetime_equals_filter(forecast_reference_time: str) -> dict[str, Any]:
+    """CQL2 filter: Item datetime is exactly this forecast start."""
+    return {
+        "op": "=",
+        "args": [
+            {"property": "datetime"},
+            {"timestamp": forecast_reference_time},
+        ],
+    }
+
+
 class STAC:
     # Namespace prefixes keep the four logical caches collision-free inside the
     # single shared diskcache store.
@@ -204,27 +215,23 @@ class STAC:
         search = self._catalog.search(collections=[collection_id], max_items=None)
         return search
 
-    def _search_item(
-        self, collection_id, item_id, max_items: int | None = None
-    ) -> ItemSearch:
-        search = self._catalog.search(
-            collections=[collection_id], ids=item_id, max_items=max_items
-        )
-        return search
-
-    def _search_item_by_reference_time(
+    def _search_item_at(
         self,
         collection_id: str,
         forecast_reference_time: str,
-        max_items: int | None = 1,
+        *,
+        fields: dict[str, list[str]] | None = None,
     ) -> ItemSearch:
-        """Search for an item by the ``forecast:reference_time`` STAC property."""
-        search = self._catalog.search(
-            collections=[collection_id],
-            query={"forecast:reference_time": {"eq": forecast_reference_time}},
-            max_items=max_items,
-        )
-        return search
+        """Find the one Item that started at this forecast time."""
+        kwargs: dict[str, Any] = {
+            "collections": [collection_id],
+            "filter": _datetime_equals_filter(forecast_reference_time),
+            "filter_lang": "cql2-json",
+            "max_items": 1,
+        }
+        if fields is not None:
+            kwargs["fields"] = fields
+        return self._catalog.search(**kwargs)
 
     def get_catalog_collection_ids(
         self, resolve: bool = False
@@ -319,9 +326,9 @@ class STAC:
         ``forecast:leadtime_length`` value so each init can get an end date
         without listing Items. Does not fetch the Collection from the API.
 
-        Reads lists via ``get_list`` rather than ``to_dict``. pystac
-        ``to_dict`` drops any summary list of 25 or more values, which would
-        force a full Item Search once a collection has that many inits.
+        Read the init list in full. Converting summaries to a dict first
+        drops any list of 25 or more dates, which would make the dashboard
+        walk every Item instead.
         """
         summaries = collection.summaries
         if summaries is None or summaries.is_empty():
@@ -444,32 +451,23 @@ class STAC:
         self, collection_id: str, forecast_reference_time: str
     ) -> Item:
         """
-        Return the full STAC Item for a forecast init, with shared cross-process
-        caching via diskcache.
+        Return the STAC Item for one forecast run.
 
-        Repeated calls with the same collection and reference time reuse the
-        cached Item (COGs, bands, leadtime) without another HTTP search.
-        Any gunicorn worker that already fetched and stored the Item makes it
-        immediately available to all other workers.
+        Asks the API for the Item whose start time is exactly this forecast
+        start. The result is cached so opening the same day again does not
+        hit the API.
         """
         cached = self._cache_get(self._NS_ITEM, collection_id, forecast_reference_time)
         if cached is not None:
             return cached
 
-        search = self._search_item_by_reference_time(
-            collection_id, forecast_reference_time
+        items = list(
+            self._search_item_at(collection_id, forecast_reference_time).items()
         )
-        items = list(search.items())
-
-        if len(items) == 0:
+        if not items:
             raise ValueError(
-                f"No item found with forecast:reference_time = "
-                f"{forecast_reference_time} in collection {collection_id}."
-            )
-        if len(items) > 1:
-            raise ValueError(
-                f"Multiple items found with forecast:reference_time = "
-                f"{forecast_reference_time} in collection {collection_id}."
+                f"No item found with datetime {forecast_reference_time} "
+                f"in collection {collection_id}."
             )
 
         item = items[0]
@@ -593,11 +591,10 @@ class STAC:
             self._cache_set(self._NS_BANDS, bands, collection_id, forecast_reference_time)
             return bands
 
-        search = self._catalog.search(
-            collections=[collection_id],
-            query={"forecast:reference_time": {"eq": forecast_reference_time}},
+        search = self._search_item_at(
+            collection_id,
+            forecast_reference_time,
             fields=_FORECAST_BANDS_FIELDS,
-            max_items=1,
         )
         for raw in search.items_as_dicts():
             bands = self._bands_from_asset_dicts(raw.get("assets") or {})
