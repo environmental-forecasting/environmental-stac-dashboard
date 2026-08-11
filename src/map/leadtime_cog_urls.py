@@ -3,7 +3,7 @@
 from typing import Any
 
 from .projections import WEB_MERCATOR_QUAD
-from .tile_urls import build_xyz_tile_url
+from .tile_urls import build_item_tile_url
 
 
 def build_leadtime_cog_urls(
@@ -16,6 +16,7 @@ def build_leadtime_cog_urls(
     band_index: int | None = None,
     reference_time: str | None = None,
     bbox_by_collection: dict[str, list[float]] | None = None,
+    item_ids_by_collection: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     """
     Build the ``leadtimeCogUrls`` payload published on map-state.
@@ -26,14 +27,15 @@ def build_leadtime_cog_urls(
     Args:
         tiler_base: Browser-facing TiTiler origin.
         tile_matrix_set: TiTiler tile matrix set id.
-        hrefs_by_collection: TiTiler-facing COG URLs per collection, ordered
-            by leadtime step.
+        hrefs_by_collection: Asset keys per collection, ordered by leadtime.
         colormap: rio-tiler colormap name shared by every step.
         rescale: Display range as ``(min, max)`` shared by every step.
         band_index: One-based band number (``bidx``).
         reference_time: Forecast init as a STAC datetime string.
         bbox_by_collection: Optional WGS84 ``[west, south, east, north]`` per
             collection so the map can clamp tile requests to the data footprint.
+        item_ids_by_collection: STAC Item id per collection. Collections
+            without an id are omitted.
 
     Returns:
         Payload for map-state ``leadtimeCogUrls``, or None when no collection
@@ -41,6 +43,7 @@ def build_leadtime_cog_urls(
     """
     collections: dict[str, Any] = {}
     bboxes = bbox_by_collection or {}
+    item_ids = item_ids_by_collection or {}
     for collection_id, hrefs in (hrefs_by_collection or {}).items():
         usable = [href for href in (hrefs or []) if href]
         if not usable:
@@ -49,6 +52,10 @@ def build_leadtime_cog_urls(
         bbox = bboxes.get(collection_id)
         if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
             meta["bbox"] = [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])]
+        item_id = item_ids.get(collection_id)
+        if not item_id:
+            continue
+        meta["itemId"] = item_id
         collections[collection_id] = meta
     if not collections or not tiler_base:
         return None
@@ -67,6 +74,19 @@ def build_leadtime_cog_urls(
     if reference_time:
         payload["refTime"] = reference_time
     return payload
+
+
+def bank_has_item_ids(leadtime_cog_urls: dict[str, Any] | None) -> bool:
+    """Return whether the cache holds titiler-pgstac Item ids."""
+    if not isinstance(leadtime_cog_urls, dict):
+        return False
+    collections = leadtime_cog_urls.get("collections") or {}
+    if not isinstance(collections, dict):
+        return False
+    return any(
+        isinstance(meta, dict) and meta.get("itemId")
+        for meta in collections.values()
+    )
 
 
 def leadtime_cog_urls_match_style(
@@ -111,11 +131,10 @@ def layers_from_leadtime_cog_urls(
     leadtime_cog_urls: dict[str, Any] | None, lead: int
 ) -> list[dict[str, Any]]:
     """
-    Build overlay layers for one leadtime from the cached COG URL list.
+    Build overlay layers for one leadtime from the Item tile cache.
 
-    The cache stores one COG URL per leadtime step for each collection, plus
-    the shared colour and band settings used to build tile URLs without
-    another catalogue request.
+    Each collection needs an ``itemId`` and ordered asset keys. Shared
+    colour and band settings stay on the query string.
 
     Args:
         leadtime_cog_urls: Payload stored on map-state as ``leadtimeCogUrls``.
@@ -145,26 +164,36 @@ def layers_from_leadtime_cog_urls(
         hrefs = meta.get("hrefs") or []
         if lead >= len(hrefs):
             continue
-        asset_url = hrefs[lead]
-        if not asset_url:
+        asset_key = hrefs[lead]
+        item_id = meta.get("itemId")
+        if not asset_key or not item_id:
             continue
+        tile_url = build_item_tile_url(
+            tiler_base=tiler_base,
+            tile_matrix_set=tile_matrix_set,
+            collection_id=collection_id,
+            item_id=str(item_id),
+            asset_key=str(asset_key),
+            colormap=colormap,
+            rescale=rescale_pair,
+            band_index=band_index,
+        )
         entry: dict[str, Any] = {
             "id": collection_id,
             "title": collection_id,
-            "tileUrl": build_xyz_tile_url(
-                tiler_base=tiler_base,
-                tile_matrix_set=tile_matrix_set,
-                asset_url=asset_url,
-                colormap=colormap,
-                rescale=rescale_pair,
-                band_index=band_index,
-            ),
+            "tileUrl": tile_url,
             "opacity": 1,
             "visible": True,
         }
         bbox = meta.get("bbox")
         if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
             entry["bbox"] = [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])]
+        try:
+            gsd_m = float(meta.get("gsd"))
+        except (TypeError, ValueError):
+            gsd_m = 0.0
+        if gsd_m > 0:
+            entry["gsd"] = gsd_m
         layers.append(entry)
     return layers
 

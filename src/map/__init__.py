@@ -1,4 +1,3 @@
-from .asset_urls import to_tiler_asset_url
 from .basemap import (
     BASEMAP_ATTRIBUTION,
     BASEMAP_DARK_MATTER,
@@ -14,6 +13,7 @@ from .basemap import (
     normalise_basemap_id,
 )
 from .leadtime_cog_urls import (
+    bank_has_item_ids,
     build_leadtime_cog_urls,
     layers_from_leadtime_cog_urls,
     leadtime_cog_urls_match_style,
@@ -46,7 +46,7 @@ from .request import (
 )
 from .state import build_map_state, default_basemap, initial_map_state
 from .tile_urls import (
-    build_cog_tile_url,
+    build_item_tile_url,
     rewrite_layer_entries_style,
     rewrite_tile_url_style,
 )
@@ -66,9 +66,10 @@ __all__ = [
     "WEB_MERCATOR_QUAD",
     "MapEngine",
     "MapViewMode",
+    "bank_has_item_ids",
     "basemap_descriptor",
     "bbox_fits_view_mode",
-    "build_cog_tile_url",
+    "build_item_tile_url",
     "build_leadtime_cog_urls",
     "build_map_state",
     "build_map_request",
@@ -103,7 +104,6 @@ __all__ = [
     "rewrite_tile_url_style",
     "tile_grid_from_tms",
     "tile_matrix_set_for_mode",
-    "to_tiler_asset_url",
     "view_hint_for_mode",
     "view_mode_and_hint",
 ]

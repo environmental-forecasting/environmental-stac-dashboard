@@ -1,7 +1,6 @@
 import math
 from functools import lru_cache
 
-import requests
 from rio_tiler.colormap import ColorMaps
 
 # One registry for the process: ColorMaps() loads cmap data on construction.
@@ -40,17 +39,3 @@ def convert_colormap_to_colorscale(cmap: str):
         f"rgba({cmap_dict[i][0]},{cmap_dict[i][1]},{cmap_dict[i][2]},{cmap_dict[i][3] / 255})"
         for i in range(len(cmap_dict))
     ]
-
-
-def get_cog_band_statistics(TITILER_URL: str, cog_url: str, band_index: int) -> dict:
-    stats_url = f"{TITILER_URL}/cog/statistics"
-    r = requests.get(stats_url, params={"url": cog_url, "bidx": band_index})
-    r.raise_for_status()
-    stats = r.json()
-
-    # Use the first key in the stats dictionary,
-    # this should match the band returned.
-    first_band_key = next(iter(stats))
-    band_stats = stats[first_band_key]
-
-    return band_stats

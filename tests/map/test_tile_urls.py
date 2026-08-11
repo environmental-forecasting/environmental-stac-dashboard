@@ -26,8 +26,7 @@ from map.projections import (  # noqa: E402
     view_hint_for_mode,
     view_mode_and_hint,
 )
-from map.asset_urls import to_tiler_asset_url  # noqa: E402
-from map.tile_urls import build_cog_tile_url  # noqa: E402
+from map.tile_urls import build_item_tile_url  # noqa: E402
 from map.tms_client import (  # noqa: E402
     clear_tile_grid_cache,
     get_tile_grid,
@@ -225,91 +224,37 @@ def test_unknown_mode_raises():
         tile_matrix_set_for_mode("not_a_mode")
 
 
-def test_to_tiler_asset_url_uses_file_scheme_for_data_mount():
-    assert (
-        to_tiler_asset_url(
-            "http://localhost:8001/data/cogs/demo.tif",
-            "http://localhost:8001",
-            "http://file-server",
-        )
-        == "file:///data/cogs/demo.tif"
-    )
-    assert (
-        to_tiler_asset_url(
-            "http://file-server/data/cogs/demo.tif",
-            "http://localhost:8001",
-            "http://file-server",
-        )
-        == "file:///data/cogs/demo.tif"
-    )
-    assert (
-        to_tiler_asset_url(
-            "file:///data/cogs/demo.tif",
-            "http://localhost:8001",
-            "http://file-server",
-        )
-        == "file:///data/cogs/demo.tif"
-    )
-    assert (
-        to_tiler_asset_url(
-            "https://example.com/other.tif",
-            "http://localhost:8001",
-            "http://file-server",
-        )
-        == "https://example.com/other.tif"
-    )
-    # Public FILE_SERVER_URL may be https while STAC hrefs stay http (or vice versa).
-    assert (
-        to_tiler_asset_url(
-            "http://localhost/files/data/cogs/demo.tif",
-            "https://localhost/files",
-            "http://file-server",
-        )
-        == "file:///data/cogs/demo.tif"
-    )
-    assert (
-        to_tiler_asset_url(
-            "https://localhost/files/data/cogs/demo.tif",
-            "http://localhost/files",
-            "http://file-server",
-        )
-        == "file:///data/cogs/demo.tif"
-    )
-
-
-def test_build_cog_tile_url_rewrites_file_server_and_keeps_xyz_placeholders():
-    url = build_cog_tile_url(
-        "http://localhost:8001/data/cogs/demo.tif",
-        tiler_url="http://localhost:8002",
-        file_server_url="http://localhost:8001",
-        file_server_internal_url="http://file-server",
+def test_build_item_tile_url_keeps_xyz_placeholders():
+    url = build_item_tile_url(
+        tiler_base="http://localhost:8002",
         tile_matrix_set=WEB_MERCATOR_QUAD,
+        collection_id="demo",
+        item_id="forecast-init",
+        asset_key="2026-07-19T00:00:00Z",
     )
-
     assert url.startswith(
-        "http://localhost:8002/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.webp?url="
+        "http://localhost:8002/collections/demo/items/forecast-init"
+        "/tiles/WebMercatorQuad/{z}/{x}/{y}.webp?assets="
     )
-    assert "file:///data/cogs/demo.tif" in url
-    assert "localhost:8001" not in url.split("url=")[1]
-    assert "file-server" not in url.split("url=")[1]
+    assert "2026-07-19T00%3A00%3A00Z" in url
+    assert "/cog/tiles/" not in url
 
 
-def test_build_cog_tile_url_appends_style_query_params():
-    url = build_cog_tile_url(
-        "http://file-server/data/cogs/demo.tif",
-        tiler_url="http://tiler",
-        file_server_url="http://localhost:8001",
-        file_server_internal_url="http://file-server",
+def test_build_item_tile_url_appends_style_query_params():
+    url = build_item_tile_url(
+        tiler_base="http://tiler",
         tile_matrix_set="EPSG6931",
+        collection_id="demo",
+        item_id="forecast-init",
+        asset_key="2026-07-19T00:00:00Z",
         colormap="blues_r",
         rescale=(0.0, 1.0),
         band_index=2,
     )
-
-    assert "/cog/tiles/EPSG6931/{z}/{x}/{y}.webp?" in url
+    assert "/collections/demo/items/forecast-init/tiles/EPSG6931/" in url
+    assert "assets=2026-07-19T00%3A00%3A00Z%7Cbidx%3D2" in url
     assert "colormap_name=blues_r" in url
     assert "rescale=0.0,1.0" in url
-    assert "bidx=2" in url
 
 
 def test_list_view_mode_presets_includes_polar_grid(monkeypatch):

@@ -15,13 +15,14 @@ from map.tile_urls import (  # noqa: E402
 
 def test_rewrite_tile_url_style_replaces_existing_params():
     url = (
-        "http://tiler/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.webp"
-        "?url=file:///data/a.tif&colormap_name=viridis&rescale=0,1&bidx=1"
+        "http://tiler/collections/demo/items/forecast-init/tiles/WebMercatorQuad"
+        "/{z}/{x}/{y}.webp?assets=2026-07-19T00%3A00%3A00Z%7Cbidx%3D1"
+        "&colormap_name=viridis&rescale=0,1"
     )
     out = rewrite_tile_url_style(url, colormap="blues_r", rescale=(2, 5))
     assert "colormap_name=blues_r" in out
     assert "rescale=2,5" in out
-    assert "bidx=1" in out
+    assert "assets=2026-07-19T00%3A00%3A00Z%7Cbidx%3D1" in out
     assert "viridis" not in out
     assert "rescale=0,1" not in out
     assert "/{z}/{x}/{y}.webp?" in out
@@ -29,8 +30,8 @@ def test_rewrite_tile_url_style_replaces_existing_params():
 
 def test_rewrite_tile_url_style_appends_missing_params():
     url = (
-        "http://tiler/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.webp"
-        "?url=file:///data/a.tif"
+        "http://tiler/collections/demo/items/forecast-init/tiles/WebMercatorQuad"
+        "/{z}/{x}/{y}.webp?assets=2026-07-19T00%3A00%3A00Z"
     )
     out = rewrite_tile_url_style(url, colormap="plasma", rescale=[-1, 3])
     assert "colormap_name=plasma" in out
@@ -38,13 +39,27 @@ def test_rewrite_tile_url_style_appends_missing_params():
     assert "/{z}/{x}/{y}.webp?" in out
 
 
+def test_rewrite_tile_url_style_updates_item_tile_query():
+    url = (
+        "http://tiler/collections/demo/items/forecast-init/tiles/EPSG6931"
+        "/{z}/{x}/{y}.webp?assets=2026-07-19T00%3A00%3A00Z%7Cbidx%3D2"
+        "&colormap_name=viridis&rescale=0,1"
+    )
+    out = rewrite_tile_url_style(url, colormap="blues_r", rescale=(2, 5))
+    assert "assets=2026-07-19T00%3A00%3A00Z%7Cbidx%3D2" in out
+    assert "colormap_name=blues_r" in out
+    assert "rescale=2,5" in out
+    assert "viridis" not in out
+    assert "/collections/demo/items/forecast-init/tiles/EPSG6931/" in out
+
+
 def test_rewrite_layer_and_leadtime_cog_urls_style():
     layers = [
         {
             "id": "demo",
             "tileUrl": (
-                "http://t/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.webp"
-                "?url=x&colormap_name=a&rescale=0,1"
+                "http://t/collections/demo/items/forecast-init/tiles/WebMercatorQuad"
+                "/{z}/{x}/{y}.webp?assets=x&colormap_name=a&rescale=0,1"
             ),
         }
     ]

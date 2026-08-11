@@ -231,9 +231,9 @@ leaflet_map = html.Div(
         dcc.Store(id="map-state", data=initial_map_state()),
         # Sole paint intent for update_cog_layer (controls only seed this store).
         dcc.Store(id="map-request", data=None),
+        # Browser STAC search owns the current Item; Dash must not fetch it again.
+        dcc.Store(id="forecast-item-client", data=None),
         dcc.Store(id="map-view-presets", data={}),
-        # Debounced view-mode for Python; live pill still drives optimistic UI.
-        dcc.Store(id="map-view-mode-paint", data=None),
         dcc.Store(id="map-bridge-tick", data=0),
         dcc.Store(id="map-goto", data=None),
         # Lightweight region meta only (never the full GeoJSON).

@@ -143,6 +143,17 @@
     };
   }
 
+  function clearForecastOverlays() {
+    Object.keys(pendingById).forEach(cancelPending);
+    Object.keys(previousById).forEach(clearPrevious);
+    Object.keys(forecastLayersById).forEach(function (layerId) {
+      if (map) {
+        map.removeLayer(forecastLayersById[layerId]);
+      }
+      delete forecastLayersById[layerId];
+    });
+  }
+
   function refreshOverlaySources() {
     Object.keys(pendingById).forEach(cancelPending);
     Object.keys(previousById).forEach(clearPrevious);
@@ -151,7 +162,12 @@
       var url = layerSourceUrl(layer);
       if (url) {
         layer.setSource(
-          createXyzSource(url, currentTileGrid, layer.get("forecastBbox"))
+          createXyzSource(
+            url,
+            currentTileGrid,
+            layer.get("forecastBbox"),
+            layer.get("forecastGsd")
+          )
         );
       }
     });
@@ -247,7 +263,12 @@
     cancelPending(layerId);
 
     var generation = (transitionGeneration += 1);
-    var source = createXyzSource(targetUrl, currentTileGrid, layerDesc.bbox);
+    var source = createXyzSource(
+      targetUrl,
+      currentTileGrid,
+      layerDesc.bbox,
+      layerDesc.gsd
+    );
     var incoming = new ol.layer.Tile({
       source: source,
       opacity: holdUntilReady ? 0 : targetOpacity,
@@ -435,8 +456,38 @@
     });
   }
 
-  function createXyzSource(url, tileGrid, bbox) {
+  function overlayMaxZoom(gsd, tileGrid) {
+    if (!global.ForecastMap || !global.ForecastMap.maxZoomForGsd) {
+      return null;
+    }
+    return global.ForecastMap.maxZoomForGsd(
+      gsd,
+      tileGrid && tileGrid.getResolutions && tileGrid.getResolutions()
+    );
+  }
+
+  function overlayTileGrid(tileGrid, maxZoom) {
+    if (!tileGrid || maxZoom == null || !isFinite(maxZoom)) {
+      return tileGrid;
+    }
+    var resolutions =
+      typeof tileGrid.getResolutions === "function"
+        ? tileGrid.getResolutions()
+        : null;
+    if (!resolutions || maxZoom >= resolutions.length - 1) {
+      return tileGrid;
+    }
+    return new ol.tilegrid.TileGrid({
+      extent: tileGrid.getExtent(),
+      origin: tileGrid.getOrigin(0),
+      resolutions: resolutions.slice(0, maxZoom + 1),
+      tileSize: tileGrid.getTileSize(0),
+    });
+  }
+
+  function createXyzSource(url, tileGrid, bbox, gsd) {
     var wrapX = !tileGrid;
+    var maxZoom = overlayMaxZoom(gsd, tileGrid);
     var options = {
       url: url,
       crossOrigin: "anonymous",
@@ -447,9 +498,11 @@
       wrapX: wrapX,
     };
     if (tileGrid) {
-      options.tileGrid = tileGrid;
+      options.tileGrid = overlayTileGrid(tileGrid, maxZoom);
       options.projection = currentProjection;
       options.wrapX = false;
+    } else if (maxZoom != null && isFinite(maxZoom)) {
+      options.maxZoom = maxZoom;
     }
     var source = new ol.source.XYZ(options);
     // Drop tiles outside the COG footprint (TiTiler outside-bounds 404s).
@@ -550,6 +603,7 @@
       return;
     }
     tileLayer.set("forecastBbox", (layerDesc && layerDesc.bbox) || null);
+    tileLayer.set("forecastGsd", layerDesc && layerDesc.gsd);
     tileLayer.setExtent(
       layerExtentFromBbox(layerDesc && layerDesc.bbox) || undefined
     );
@@ -788,7 +842,12 @@
         cancelPending(layer.id);
         clearPrevious(layer.id);
         tileLayer = new ol.layer.Tile({
-          source: createXyzSource(layer.tileUrl, currentTileGrid, layer.bbox),
+          source: createXyzSource(
+            layer.tileUrl,
+            currentTileGrid,
+            layer.bbox,
+            layer.gsd
+          ),
           opacity: layer.opacity == null ? 1 : layer.opacity,
           visible: layer.visible !== false,
           zIndex: 100 + i,
@@ -809,7 +868,12 @@
         cancelPending(layer.id);
         clearPrevious(layer.id);
         existing.setSource(
-          createXyzSource(layer.tileUrl, currentTileGrid, layer.bbox)
+          createXyzSource(
+            layer.tileUrl,
+            currentTileGrid,
+            layer.bbox,
+            layer.gsd
+          )
         );
       } else {
         // The stable layer already shows this COG/style; drop any stale swap.
@@ -905,8 +969,13 @@
         }
       }
       var range;
+      var layerZ = z;
+      var layerMax = overlayMaxZoom(layer.gsd, tileGrid);
+      if (layerMax != null && layerZ > layerMax) {
+        layerZ = layerMax;
+      }
       try {
-        range = tileGrid.getTileRangeForExtentAndZ(warmExtent, z);
+        range = tileGrid.getTileRangeForExtentAndZ(warmExtent, layerZ);
       } catch (err) {
         continue;
       }
@@ -915,7 +984,7 @@
       }
       var budget = remaining;
       global.ForecastMap.prefetchTileImages([layer], {
-        z: z,
+        z: layerZ,
         minX: range.minX,
         maxX: range.maxX,
         minY: range.minY,
@@ -1101,11 +1170,12 @@
       }
       return;
     }
+    // Drop the previous TMS immediately. Holding Web Mercator tiles on a
+    // polar grid (or the reverse) leaves a remnant overlay in the wrong CRS.
+    clearForecastOverlays();
     applyView(state.view);
     setBasemap(state.basemap, state.view && state.view.showBasemap);
-    // Hard swap on a projection change: the tile grid and CRS must rebuild.
-    // Hold overlays until tiles load so polar to global does not flash blank.
-    syncLayers(state.layers, { smooth: true, holdUntilReady: true });
+    syncLayers(state.layers, { smooth: false });
     tryPendingFit();
     // Tiles requested at 0x0 stay cached for the same z/x/y after layout.
     // Flag that case and refresh once ResizeObserver (or a later apply) has size.

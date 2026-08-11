@@ -2,7 +2,7 @@
 """Benchmark leadtime scrub latency against a running dashboard.
 
 Measures time from setting the leadtime slider until ForecastMap reports tiles
-ready, plus first /cog/tiles/ response timing. Writes median JSON under
+ready, plus first Item tile response timing. Writes median JSON under
 bench/results/{label}.json for before/after commit comparisons.
 
 Setup (host, not the dashboard image)::
@@ -103,7 +103,7 @@ def _run_once(
 
     def on_response(response) -> None:
         url = response.url
-        if "/cog/tiles/" not in url:
+        if "/items/" not in url or "/tiles/" not in url:
             return
         cog_meta.append(
             {

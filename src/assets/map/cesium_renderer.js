@@ -535,11 +535,42 @@
   }
 
   function makeForecastImagery(layerDesc, alpha) {
+    var opts = {
+      url: layerDesc.tileUrl,
+      credit: new Cesium.Credit(layerDesc.title || layerDesc.id),
+    };
+    var maxZoom =
+      global.ForecastMap && global.ForecastMap.maxZoomForGsd
+        ? global.ForecastMap.maxZoomForGsd(layerDesc.gsd)
+        : null;
+    if (maxZoom != null) {
+      opts.maximumLevel = maxZoom;
+    }
+    var bbox = layerDesc.bbox;
+    if (bbox && bbox.length >= 4) {
+      var west = Number(bbox[0]);
+      var south = Number(bbox[1]);
+      var east = Number(bbox[2]);
+      var north = Number(bbox[3]);
+      // west=-180 and east=180 collapse to a zero-width rectangle in Cesium,
+      // so the globe requests no forecast tiles. Inset a full-width span.
+      if (isFinite(west) && isFinite(east) && east - west >= 359) {
+        west = -179.99;
+        east = 179.99;
+      }
+      if (
+        isFinite(west) &&
+        isFinite(south) &&
+        isFinite(east) &&
+        isFinite(north) &&
+        east > west &&
+        north > south
+      ) {
+        opts.rectangle = Cesium.Rectangle.fromDegrees(west, south, east, north);
+      }
+    }
     var imagery = new Cesium.ImageryLayer(
-      new Cesium.UrlTemplateImageryProvider({
-        url: layerDesc.tileUrl,
-        credit: new Cesium.Credit(layerDesc.title || layerDesc.id),
-      })
+      new Cesium.UrlTemplateImageryProvider(opts)
     );
     imagery.alpha = alpha;
     imagery.show = layerDesc.visible !== false;
@@ -917,11 +948,36 @@
     };
   }
 
+  function unionLayerBbox(layers) {
+    var west = Infinity;
+    var south = Infinity;
+    var east = -Infinity;
+    var north = -Infinity;
+    var found = false;
+    var i;
+    for (i = 0; i < (layers || []).length; i += 1) {
+      var bbox = layers[i] && layers[i].bbox;
+      if (!bbox || bbox.length < 4) {
+        continue;
+      }
+      west = Math.min(west, Number(bbox[0]));
+      south = Math.min(south, Number(bbox[1]));
+      east = Math.max(east, Number(bbox[2]));
+      north = Math.max(north, Number(bbox[3]));
+      found = true;
+    }
+    if (!found || !isFinite(west) || west >= east || south >= north) {
+      return null;
+    }
+    return [west, south, east, north];
+  }
+
   /**
    * Warm tile URLs for the current globe viewport so the next steps paint sooner.
    *
    * Viewport range is Cesium-specific; Image() warming is shared via
-   * ForecastMap.prefetchTileImages.
+   * ForecastMap.prefetchTileImages. Intersect with the Item footprint so
+   * the globe does not prefetch ocean tiles that 404.
    */
   function prefetchLayers(layers, options) {
     if (!viewer || !layers || !layers.length) {
@@ -975,6 +1031,31 @@
       } else {
         east = 180;
       }
+    }
+    var clamp = unionLayerBbox(layers);
+    if (clamp) {
+      west = Math.max(west, clamp[0]);
+      south = Math.max(south, clamp[1]);
+      east = Math.min(east, clamp[2]);
+      north = Math.min(north, clamp[3]);
+      if (west >= east || south >= north) {
+        return;
+      }
+    }
+    var cap = null;
+    if (global.ForecastMap && global.ForecastMap.maxZoomForGsd) {
+      for (var li = 0; li < layers.length; li += 1) {
+        var one = global.ForecastMap.maxZoomForGsd(
+          layers[li] && layers[li].gsd
+        );
+        if (one == null) {
+          continue;
+        }
+        cap = cap == null ? one : Math.min(cap, one);
+      }
+    }
+    if (cap != null && z > cap) {
+      z = cap;
     }
     var sw = lonLatToTileXY(west, south, z);
     var ne = lonLatToTileXY(east, north, z);
@@ -1042,8 +1123,9 @@
     }
     var generation = (applyGeneration += 1);
     setBasemap(state.basemap, state.view && state.view.showBasemap);
-    // Soft-swap with hold so globe / TMS switches do not flash empty imagery.
-    syncLayers(state.layers, { smooth: true, holdUntilReady: true });
+    // Replace overlays. Holding the previous TMS on this globe leaves a
+    // Web Mercator remnant until the new tiles exist.
+    syncLayers(state.layers, { smooth: false });
     viewer.resize();
     // ensureViewer may have run while the host was still hidden.
     if (wasHidden) {

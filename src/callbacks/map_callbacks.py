@@ -12,18 +12,13 @@ from components.controls import (
     forecast_init_disabled_dates,
 )
 from config import (
-    FILE_SERVER_INTERNAL_URL,
-    FILE_SERVER_URL,
     STAC_FASTAPI_URL,
     TILER_INTERNAL_URL,
-    TILER_URL,
 )
 from dash import Input, Output, State, callback_context, no_update
 from dash.exceptions import PreventUpdate
-from pystac import Asset
 from stac.process import STAC
 from stac.timefmt import (
-    date_picker_to_reference_time,
     format_slider_label,
     format_valid_time,
     parse_stac_datetime,
@@ -40,30 +35,20 @@ from user_prefs import (
 )
 
 from map import (
-    WEB_MERCATOR_QUAD,
     DEFAULT_BASEMAP_ID,
     MapEngine,
     MapViewMode,
     basemap_descriptor,
-    bbox_fits_view_mode,
-    build_cog_tile_url,
-    build_leadtime_cog_urls,
     build_map_request,
     build_map_state,
-    collections_list,
     resolve_live_colormap,
     initial_map_state,
-    layers_from_leadtime_cog_urls,
-    leadtime_cog_urls_match_style,
     list_basemap_options,
     list_view_mode_options,
     list_view_mode_presets,
-    resolve_mode_and_engine,
     resolve_engine_for_mode,
     rewrite_layer_entries_style,
     rewrite_leadtime_cog_urls_style,
-    tile_matrix_set_for_mode,
-    to_tiler_asset_url,
     view_mode_and_hint,
 )
 
@@ -73,7 +58,7 @@ from .display_style import (
     cbar_slider_step,
     normalise_display_style,
 )
-from .utils import get_cog_band_statistics, round_2dp
+from .utils import round_2dp
 
 _BUSY_HIDDEN = "forecast-busy is-hidden"
 # Match --bp-drawer / --layout-* in forecast_map.css (media queries cannot
@@ -124,242 +109,40 @@ def _end_calendar_day_from_init(row: dict) -> str | None:
     return None
 
 
-def _resolve_band_minmax(
-    stac: STAC, asset: Asset, band_index: int, cog_href: str
-) -> tuple[float, float]:
-    """
-    Prefer band STATISTICS_* on the STAC asset; fall back to TiTiler statistics.
-    """
-    rescale = stac.get_band_rescale(asset, band_index)
-    if rescale is not None:
-        return rescale
-
-    tiler_cog = to_tiler_asset_url(cog_href, FILE_SERVER_URL, FILE_SERVER_INTERNAL_URL)
-    band_stats = get_cog_band_statistics(
-        TILER_INTERNAL_URL, cog_url=tiler_cog, band_index=band_index
-    )
-    return float(band_stats.get("min", 0)), float(band_stats.get("max", 1))
+_WEB_MERCATOR_Z0 = 156543.03392804097
 
 
-def _build_forecast_layer_entries(
-    stac: STAC,
-    collection_ids: list,
-    forecast_reference_time_str: str,
-    leadtime: int,
-    band_index: int,
-    colormap: str,
-    min_val: float,
-    max_val: float,
-    tile_matrix_set: str = WEB_MERCATOR_QUAD,
-    view_mode: str = MapViewMode.GLOBAL_3857.value,
-) -> list[dict]:
-    """
-    Build shared forecast layer descriptors for map-state and Leaflet.
-
-    Args:
-        stac: Cached STAC client.
-        collection_ids: Selected collection ids.
-        forecast_reference_time_str: Forecast init as a STAC datetime string.
-        leadtime: Leadtime index into COG assets.
-        band_index: One-based band index for TiTiler.
-        colormap: rio-tiler colormap name.
-        min_val: Display rescale minimum.
-        max_val: Display rescale maximum.
-        tile_matrix_set: TiTiler tile matrix set id.
-        view_mode: Active map view mode (filters unfit hemispheres).
-
-    Returns:
-        List of layer dicts with ``id``, ``title``, ``tileUrl``, ``opacity``,
-        ``visible``, and optional WGS84 ``bbox``.
-    """
-    layers: list[dict] = []
-    for collection_id in collection_ids or []:
-        try:
-            if not _collection_fits_view_mode(stac, collection_id, view_mode):
-                logging.info(
-                    "Skipping collection %s: does not fit view mode %s",
-                    collection_id,
-                    view_mode,
-                )
-                continue
-
-            cogs = stac.get_item_cogs(collection_id, forecast_reference_time_str)
-            cog_assets = list(cogs.values())
-
-            if leadtime >= len(cog_assets):
-                logging.warning(
-                    "Leadtime %s out of range for %s", leadtime, collection_id
-                )
-                continue
-
-            cog_asset = cog_assets[leadtime]
-            tile_url = build_cog_tile_url(
-                cog_asset.href,
-                tiler_url=TILER_URL,
-                file_server_url=FILE_SERVER_URL,
-                file_server_internal_url=FILE_SERVER_INTERNAL_URL,
-                tile_matrix_set=tile_matrix_set,
-                colormap=colormap,
-                rescale=(min_val, max_val),
-                band_index=band_index,
-            )
-            logging.debug("tile_url: %s", tile_url)
-
-            entry = {
-                "id": collection_id,
-                "title": collection_id,
-                "tileUrl": tile_url,
-                "opacity": 1,
-                "visible": True,
-            }
-            bbox = _forecast_bbox_wgs84(
-                stac, collection_id, forecast_reference_time_str
-            )
-            if bbox:
-                entry["bbox"] = bbox
-            layers.append(entry)
-        except Exception as e:
-            logging.error("Error processing collection %s: %s", collection_id, e)
-            continue
-    return layers
-
-
-def _forecast_bbox_wgs84(
-    stac: STAC,
-    collection_id: str,
-    forecast_reference_time_str: str,
-) -> list[float] | None:
-    """
-    WGS84 ``[west, south, east, north]`` for clamping overlay tile requests.
-
-    Prefers the forecast Item bbox (matches the COG footprint); falls back to
-    the collection spatial extent. Skips antimeridian-spanning boxes.
-    """
-    bbox = None
+def _mercator_max_native_zoom(gsd: object) -> int | None:
+    """Highest Web Mercator z to fetch before the browser stretches tiles."""
     try:
-        _temporal, item_bbox = stac.get_item_extents(
-            collection_id, forecast_reference_time_str
-        )
-        bbox = item_bbox
-    except Exception:
-        bbox = None
-    if bbox is None or len(bbox) < 4:
-        try:
-            _temporal, spatial = stac.get_collection_extents(collection_id)
-            bbox = spatial
-        except Exception:
-            return None
-    try:
-        west, south, east, north = (
-            float(bbox[0]),
-            float(bbox[1]),
-            float(bbox[2]),
-            float(bbox[3]),
-        )
-    except (TypeError, ValueError, IndexError):
+        size = float(gsd)
+    except (TypeError, ValueError):
         return None
-    if not all(map(lambda v: v == v and abs(v) != float("inf"), (west, south, east, north))):
+    if size <= 0:
         return None
-    # OpenLayers transformExtent needs a simple west<east box.
-    if west >= east or south >= north:
-        return None
-    return [west, south, east, north]
+    min_cell = size / 32
+    for zoom in range(0, 23):
+        if _WEB_MERCATOR_Z0 / (2**zoom) < min_cell:
+            return max(0, zoom - 1)
+    return None
 
-
-def _build_leadtime_cog_urls(
-    stac: STAC,
-    collection_ids: list,
-    forecast_reference_time_str: str,
-    band_index: int,
-    colormap: str,
-    min_val: float,
-    max_val: float,
-    tile_matrix_set: str,
-    view_mode: str,
-) -> dict | None:
-    """
-    Collect every leadtime COG URL for the current forecast and style.
-
-    Published on map-state as ``leadtimeCogUrls`` so the browser can swap
-    overlays while scrubbing or playing without a Python round trip.
-
-    Args:
-        stac: Cached STAC client.
-        collection_ids: Selected collection ids.
-        forecast_reference_time_str: Forecast init as a STAC datetime string.
-        band_index: One-based band index for TiTiler.
-        colormap: rio-tiler colormap name.
-        min_val: Display rescale minimum.
-        max_val: Display rescale maximum.
-        tile_matrix_set: TiTiler tile matrix set id.
-        view_mode: Active map view mode (filters unfit hemispheres).
-
-    Returns:
-        Payload for map-state, or None when no collection has COG assets.
-    """
-    hrefs_by_collection: dict[str, list[str]] = {}
-    bbox_by_collection: dict[str, list[float]] = {}
-    for collection_id in collection_ids or []:
-        try:
-            if not _collection_fits_view_mode(stac, collection_id, view_mode):
-                continue
-            cogs = stac.get_item_cogs(collection_id, forecast_reference_time_str)
-            hrefs_by_collection[collection_id] = [
-                to_tiler_asset_url(
-                    asset.href, FILE_SERVER_URL, FILE_SERVER_INTERNAL_URL
-                )
-                for asset in cogs.values()
-            ]
-            bbox = _forecast_bbox_wgs84(
-                stac, collection_id, forecast_reference_time_str
-            )
-            if bbox:
-                bbox_by_collection[collection_id] = bbox
-        except Exception as e:
-            logging.error(
-                "Error collecting leadtime COG URLs for %s: %s", collection_id, e
-            )
-            continue
-
-    return build_leadtime_cog_urls(
-        tiler_base=TILER_URL,
-        tile_matrix_set=tile_matrix_set,
-        hrefs_by_collection=hrefs_by_collection,
-        colormap=colormap,
-        rescale=(min_val, max_val),
-        band_index=band_index,
-        reference_time=forecast_reference_time_str,
-        bbox_by_collection=bbox_by_collection or None,
-    )
-
-
-def _collection_fits_view_mode(
-    stac: STAC, collection_id: str, view_mode: str
-) -> bool:
-    """Return whether a collection's spatial extent fits the map view mode."""
-    try:
-        _temporal, spatial_extent = stac.get_collection_extents(collection_id)
-    except Exception as e:
-        logging.debug(
-            "Could not read extent for %s (%s); treating as a fit",
-            collection_id,
-            e,
-        )
-        return True
-    return bbox_fits_view_mode(spatial_extent, view_mode)
 
 def _build_leaflet_overlays(layer_entries: list[dict]) -> list:
     """Build Leaflet Overlay children from shared layer descriptors."""
     tile_layers = []
     for index, layer in enumerate(layer_entries):
+        tile_kwargs: dict = {
+            "id": {"type": "cog-collections", "index": index},
+            "url": layer["tileUrl"],
+            "zIndex": 100,
+            "opacity": layer.get("opacity", 1),
+        }
+        max_native = _mercator_max_native_zoom(layer.get("gsd"))
+        if max_native is not None:
+            tile_kwargs["maxNativeZoom"] = max_native
         tile_layers.append(
             dl.Overlay(
-                dl.TileLayer(
-                    id={"type": "cog-collections", "index": index},
-                    url=layer["tileUrl"],
-                    zIndex=100,
-                    opacity=layer.get("opacity", 1),
-                ),
+                dl.TileLayer(**tile_kwargs),
                 name=layer.get("title") or layer["id"],
                 checked=layer.get("visible", True),
             )
@@ -375,9 +158,6 @@ def register_callbacks(app: dash.Dash):
     Args:
         The Dash app instance.
     """
-
-    # # Get first `collection_id` for testing
-    # collection_id = stac.get_catalog_collection_ids()[0]
 
     # Publish viewport width on load and whenever the window is resized.
     # Only write when the width changes so leadtime mark density updates
@@ -562,34 +342,6 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_call=True,
     )
 
-    # Debounce TMS clicks before Python rebuilds tile URLs.
-    app.clientside_callback(
-        """
-        function(mode) {
-            var nu = window.dash_clientside.no_update;
-            if (!mode) {
-                return nu;
-            }
-            if (window.__viewModePaintTimer) {
-                clearTimeout(window.__viewModePaintTimer);
-            }
-            window.__viewModePaintTimer = setTimeout(function () {
-                window.__viewModePaintTimer = null;
-                if (window.dash_clientside
-                        && typeof window.dash_clientside.set_props === "function") {
-                    window.dash_clientside.set_props("map-view-mode-paint", {
-                        data: { mode: mode, t: Date.now() },
-                    });
-                }
-            }, 400);
-            return nu;
-        }
-        """,
-        Output("map-bridge-tick", "data", allow_duplicate=True),
-        Input("map-view-mode", "value"),
-        prevent_initial_call=True,
-    )
-
     # Show north-up controls only for polar / custom EPSG#### modes.
     app.clientside_callback(
         """
@@ -660,20 +412,92 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_call=False,
     )
 
-    # A new forecast init makes the published COG URLs stale, so drop them
-    # before the scrubber resets and asks for a swap.
+    # One browser STAC search per date / collection. Keep the last overlay
+    # until the new Item is in hand (do not clear leadtimeCogUrls here).
     app.clientside_callback(
         """
-        function(_date) {
+        function(date, collections, variable, colormap, viewMode, displayStyle, userPrefs) {
             if (window.ForecastMap
-                    && typeof window.ForecastMap.clearLeadtimeCogUrls === "function") {
-                window.ForecastMap.clearLeadtimeCogUrls();
+                    && typeof window.ForecastMap.loadForecast === "function") {
+                var prefs = userPrefs || {};
+                window.ForecastMap.loadForecast({
+                    date: date,
+                    collections: collections,
+                    variable: variable != null ? variable : prefs.variable,
+                    colormap: colormap,
+                    viewMode: viewMode,
+                    displayStyle: displayStyle,
+                });
             }
             return window.dash_clientside.no_update;
         }
         """,
         Output("map-bridge-tick", "data", allow_duplicate=True),
         Input("forecast-init-date-picker", "value"),
+        Input("collections-dropdown", "value"),
+        State("variable-dropdown", "value"),
+        State("colormap-dropdown", "value"),
+        State("map-view-mode", "value"),
+        State("display-style", "data"),
+        State("user-prefs", "data"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(variable, displayStyle) {
+            if (window.ForecastMap
+                    && typeof window.ForecastMap.applyBand === "function") {
+                window.ForecastMap.applyBand(variable, displayStyle);
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("map-bridge-tick", "data", allow_duplicate=True),
+        Input("variable-dropdown", "value"),
+        State("display-style", "data"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(colormap, displayStyle) {
+            var nu = window.dash_clientside.no_update;
+            if (!window.ForecastMap
+                    || typeof window.ForecastMap.applyStyle !== "function") {
+                return [nu, nu];
+            }
+            var style = displayStyle || {};
+            window.ForecastMap.applyStyle({
+                colormap: colormap,
+                vmin: style.vmin,
+                vmax: style.vmax,
+            });
+            if (style.locked || !colormap || colormap === style.colormap) {
+                return [nu, nu];
+            }
+            return [Object.assign({}, style, { colormap: colormap }), nu];
+        }
+        """,
+        Output("display-style", "data", allow_duplicate=True),
+        Output("map-bridge-tick", "data", allow_duplicate=True),
+        Input("colormap-dropdown", "value"),
+        State("display-style", "data"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(refresh) {
+            if (window.ForecastMap
+                    && typeof window.ForecastMap.applyAutoScale === "function") {
+                window.ForecastMap.applyAutoScale();
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("map-bridge-tick", "data", allow_duplicate=True),
+        Input("map-style-refresh", "data"),
         prevent_initial_call=True,
     )
 
@@ -1175,180 +999,6 @@ def register_callbacks(app: dash.Dash):
         ]
 
     @app.callback(
-        Output("variable-dropdown", "options"),
-        Output("variable-dropdown", "value"),
-        Output("forecast-busy", "className", allow_duplicate=True),
-        Output("forecast-busy-label", "children", allow_duplicate=True),
-        Output("map-request", "data", allow_duplicate=True),
-        Input("forecast-init-date-picker", "value"),
-        Input("collections-dropdown", "value"),
-        State("variable-dropdown", "value"),
-        State("user-prefs", "data"),
-        State("colormap-dropdown", "value"),
-        State("map-view-mode", "value"),
-        State("map-request", "data"),
-        State("leadtime-slider", "value"),
-        prevent_initial_call=True,
-    )
-    def update_available_variables(
-        selected_date,
-        collection_ids: list,
-        current_value,
-        user_prefs,
-        colormap,
-        map_view_mode,
-        previous_request,
-        leadtime_slider,
-    ):
-        """
-        Fill the variable dropdown for the selected forecast date.
-
-        Loads variable names through a light catalogue query so the list can
-        appear without waiting for a full forecast download. Prefer a
-        browser-saved band when it is still offered; otherwise keep the
-        current choice when valid, or pick the first variable.
-
-        Also emits ``map-request`` once the recipe is complete. Cascading
-        programmatic writes to collection/date/variable Inputs are not a
-        reliable paint trigger after prefs rehydration; writing the request
-        here (where the resolved band is known) is.
-        """
-        if not selected_date or not collection_ids:
-            # Collection-only: leave the dates busy banner alone (owned by
-            # update_forecast_start_dates). Do not hide/show here.
-            return [], None, no_update, no_update, no_update
-
-        stac = _get_stac_client()
-        forecast_reference_time_str = date_picker_to_reference_time(selected_date)
-        combined_vars: dict[str, int] = {}
-
-        for collection_id in collection_ids:
-            try:
-                available_vars = stac.list_forecast_bands(
-                    collection_id, forecast_reference_time_str
-                )
-                for var_name, band_index in available_vars.items():
-                    # Prefer the first collection that offers this name.
-                    if var_name not in combined_vars:
-                        combined_vars[var_name] = band_index
-            except Exception as e:
-                logging.warning(
-                    "Error retrieving variables for %s: %s", collection_id, e
-                )
-                continue
-
-        if not combined_vars:
-            return [], None, _BUSY_HIDDEN, no_update, no_update
-
-        options = [
-            {"label": var_name, "value": band_index}
-            for var_name, band_index in combined_vars.items()
-        ]
-        values = {opt["value"] for opt in options}
-        preferred = preferred_in(user_prefs, "variable", values)
-        if preferred is not None:
-            value_out = preferred if preferred != current_value else no_update
-        elif current_value in values:
-            value_out = no_update
-        else:
-            value_out = options[0]["value"]
-
-        resolved_band = (
-            value_out if value_out is not no_update else current_value
-        )
-        if resolved_band not in values:
-            resolved_band = None
-
-        # Date change with an unchanged band still needs a paint (variable
-        # Input may not fire). Seed the request from the resolved recipe.
-        if resolved_band is None:
-            request_out = no_update
-        else:
-            clear_lock = (
-                previous_request is not None
-                and isinstance(previous_request, dict)
-                and previous_request.get("variable") != resolved_band
-            )
-            lead = 0
-            if (
-                isinstance(previous_request, dict)
-                and previous_request.get("collection")
-                == collections_list(collection_ids)
-                and previous_request.get("forecast_start") == selected_date
-                and previous_request.get("variable") == resolved_band
-                and leadtime_slider is not None
-            ):
-                lead = leadtime_slider
-            request_out = build_map_request(
-                previous_request,
-                collection=collection_ids,
-                forecast_start=selected_date,
-                variable=resolved_band,
-                colormap=colormap,
-                view_mode=map_view_mode,
-                lead=lead,
-                clear_lock=clear_lock,
-            )
-            logging.debug(
-                "map-request from variables: collection=%s date=%s band=%s rev=%s",
-                collection_ids,
-                selected_date,
-                resolved_band,
-                (request_out or {}).get("revision"),
-            )
-
-        # Dropdown is ready; remaining wait is the map rebuild / tile paint.
-        return options, value_out, "forecast-busy", "Updating map…", request_out
-
-    @app.callback(
-        Output("leadtime-axis", "data"),
-        Input("forecast-init-date-picker", "value"),
-        Input("collections-dropdown", "value"),
-        prevent_initial_call=True,
-    )
-    def update_leadtime_axis(selected_date: str, collection_ids: list):
-        """
-        Load ordered COG valid times for the scrubber from STAC.
-
-        Uses the shortest axis when several collections are selected so lead
-        indices stay in range for every overlay.
-        """
-        if not selected_date or not collection_ids:
-            return None
-
-        if isinstance(collection_ids, str):
-            collection_ids = [collection_ids]
-
-        stac = _get_stac_client()
-        forecast_reference_time_str = date_picker_to_reference_time(selected_date)
-        axes: list[dict] = []
-        for collection_id in collection_ids:
-            try:
-                axis = stac.get_leadtime_axis(
-                    collection_id, forecast_reference_time_str
-                )
-            except Exception as e:
-                logging.warning(
-                    "Could not load leadtime axis for %s: %s", collection_id, e
-                )
-                continue
-            times = axis.get("times") or []
-            if times:
-                axes.append(axis)
-
-        if not axes:
-            return None
-
-        # Prefer the shortest shared lead count so every collection can paint.
-        chosen = min(axes, key=lambda axis: len(axis["times"]))
-        logging.info(
-            "Leadtime axis: %s steps, step_unit=%s",
-            len(chosen["times"]),
-            chosen.get("step_unit"),
-        )
-        return chosen
-
-    @app.callback(
         Output("time-slider-div", "className"),
         Output("selected-time", "children"),
         Output("leadtime-step-subtitle", "children"),
@@ -1505,13 +1155,8 @@ def register_callbacks(app: dash.Dash):
 
     @app.callback(
         Output("map-request", "data"),
-        Input("collections-dropdown", "value"),
-        Input("forecast-init-date-picker", "value"),
-        Input("variable-dropdown", "value"),
-        Input("colormap-dropdown", "value"),
-        Input("map-view-mode-paint", "data"),
-        Input("map-style-refresh", "data"),
         Input("leadtime-confirm", "data"),
+        State("colormap-dropdown", "value"),
         State("display-style", "data"),
         State("map-request", "data"),
         State("leadtime-slider", "value"),
@@ -1519,145 +1164,42 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_call=True,
     )
     def publish_map_request(
-        collection_ids,
-        forecast_start,
-        variable,
-        colormap,
-        map_view_mode_paint,
-        style_refresh,
         leadtime_confirm,
+        colormap,
         display_style,
         previous_request,
         leadtime_slider,
         map_view_mode,
     ):
-        """
-        Translate control changes into a single paint intent.
-
-        Incomplete recipes clear the request (and thus the map). Locked
-        colormap edits are left to ``apply_locked_display_style`` so this
-        path does not fight the clientside pin callbacks.
-
-        Leadtime confirms that carry ``force`` (init-day rewind) rebuild even
-        while playing; routine confirms are marked ``leadtime_only`` so the
-        painter can drop them mid-animation.
-
-        View-mode uses the debounced ``map-view-mode-paint`` store so rapid
-        TMS clicks only enqueue one Python rebuild.
-        """
-        triggered = callback_context.triggered_id
+        """Record the settled leadtime on ``map-request`` (Reset still clears it)."""
         prev = previous_request if isinstance(previous_request, dict) else None
-        if triggered == "map-view-mode-paint" and isinstance(
-            map_view_mode_paint, dict
-        ):
-            view_mode = map_view_mode_paint.get("mode") or map_view_mode
-        else:
-            view_mode = map_view_mode
-
-        # Locked colormap edits are applied once overlays exist.
-        if triggered == "colormap-dropdown" and normalise_display_style(
-            display_style
-        ).get("locked"):
+        if not prev or not isinstance(leadtime_confirm, dict):
             raise PreventUpdate
-
-        # Auto (map-style-refresh) forces a fresh unlocked statistics rebuild.
-        force_stats = triggered == "map-style-refresh"
-        leadtime_only = False
-        lead = leadtime_slider if leadtime_slider is not None else 0
-        cols = collections_list(collection_ids)
-
-        if triggered == "leadtime-confirm":
-            if not prev or not isinstance(leadtime_confirm, dict):
-                raise PreventUpdate
-            if leadtime_confirm.get("lead") is not None:
-                lead = leadtime_confirm["lead"]
-            else:
-                lead = prev.get("lead", 0)
-            # force=True: update_leadtime_slider rewound for a new init.
-            # Routine confirms stay leadtime_only so play ticks skip Python.
-            leadtime_only = not bool(leadtime_confirm.get("force"))
-            # Prefer the live dropdown / display-style over a stale request.
-            # Locked colormap edits skip this publisher, so prev.colormap can
-            # still be blues_r while play soft-swaps the user's ramp from the
-            # rewritten leadtimeCogUrls cache - and Pause would snap back.
-            style_cmap = normalise_display_style(display_style).get("colormap")
-            return build_map_request(
-                prev,
-                collection=prev["collection"],
-                forecast_start=prev["forecast_start"],
-                variable=prev["variable"],
-                colormap=resolve_live_colormap(
-                    colormap,
-                    style_cmap,
-                    prev.get("colormap"),
-                ),
-                view_mode=view_mode or prev.get("view_mode"),
-                lead=lead,
-                force_stats=False,
-                clear_lock=False,
-                leadtime_only=leadtime_only,
+        if leadtime_confirm.get("lead") is not None:
+            lead = leadtime_confirm["lead"]
+        else:
+            lead = (
+                leadtime_slider
+                if leadtime_slider is not None
+                else prev.get("lead", 0)
             )
-
-        if triggered == "forecast-init-date-picker":
-            # The step held in State belongs to the previous forecast until
-            # the scrubber callback rewinds it.
-            lead = 0
-        elif (
-            triggered
-            in ("map-view-mode-paint", "colormap-dropdown", "map-style-refresh")
-            and prev
-        ):
-            lead = prev.get("lead", 0)
-
-        try:
-            band = int(variable) if variable is not None and variable != "" else None
-        except (TypeError, ValueError):
-            band = None
-
-        # A new variable must not keep a pinned range from the previous band.
-        clear_lock = (
-            triggered == "variable-dropdown"
-            and prev is not None
-            and band is not None
-            and prev.get("variable") != band
-        )
-        tms_only = (
-            triggered == "map-view-mode-paint"
-            and prev is not None
-            and band is not None
-            and prev.get("collection") == cols
-            and prev.get("forecast_start") == forecast_start
-            and prev.get("variable") == band
-        )
-        colormap_only = (
-            triggered == "colormap-dropdown"
-            and prev is not None
-            and not force_stats
-            and band is not None
-            and prev.get("collection") == cols
-            and prev.get("forecast_start") == forecast_start
-            and prev.get("variable") == band
-        )
-
-        request = build_map_request(
+        style_cmap = normalise_display_style(display_style).get("colormap")
+        return build_map_request(
             prev,
-            collection=collection_ids,
-            forecast_start=forecast_start,
-            variable=variable,
-            colormap=colormap,
-            view_mode=view_mode,
+            collection=prev["collection"],
+            forecast_start=prev["forecast_start"],
+            variable=prev["variable"],
+            colormap=resolve_live_colormap(
+                colormap,
+                style_cmap,
+                prev.get("colormap"),
+            ),
+            view_mode=map_view_mode or prev.get("view_mode"),
             lead=lead,
-            force_stats=force_stats,
-            clear_lock=clear_lock,
-            leadtime_only=leadtime_only,
-            tms_only=tms_only,
-            colormap_only=colormap_only,
+            force_stats=False,
+            clear_lock=False,
+            leadtime_only=not bool(leadtime_confirm.get("force")),
         )
-        if request is None:
-            if prev is None:
-                raise PreventUpdate
-            return None
-        return request
 
     @app.callback(
         Output("map-state", "data"),
@@ -1665,48 +1207,18 @@ def register_callbacks(app: dash.Dash):
         Output("display-style", "data"),
         Output("map-view-mode", "value"),
         Input("map-request", "data"),
-        State("display-style", "data"),
         State("map-state", "data"),
-        State("leadtime-playing", "data"),
-        State("map-view-mode", "value"),
         prevent_initial_call=True,
     )
     def update_cog_layer(
         map_request,
-        display_style,
         map_state,
-        leadtime_playing,
-        live_view_mode,
     ):
         """
-        Resolve tiles from ``map-request`` and publish ``map-state``.
+        Clear overlays when ``map-request`` is cleared.
 
-        Control widgets never paint directly; ``publish_map_request`` (and the
-        variables bootstrap path) turn their values into this store so prefs
-        rehydration and user edits share one path.
-
-        Writes shared ``map-state`` for OpenLayers (default). When the engine is
-        ``leaflet_legacy``, also builds Leaflet Overlay children.
-
-        The display range and lock flag live in ``display-style`` (the single
-        source of truth for the colourbar). When locked, that pinned range is
-        used to build tiles here; when unlocked, this callback computes fresh
-        statistics (Item STATISTICS_* first, TiTiler statistics as a
-        fallback). Locked colormap edits are applied by
-        ``apply_locked_display_style`` instead of here, so this callback does
-        not take the colourbar min/max inputs as Inputs (that would create a
-        feedback loop with the clientside pin callbacks).
-
-        Picking a new variable clears any pinned range from the previous band
-        (``clear_lock`` on the request). ``map-style-refresh`` (colourbar Auto)
-        sets ``force_stats`` so a fresh unlocked statistics rebuild runs even
-        if a pin was active moments before.
-
-        Leadtime comes from ``leadtime-confirm`` via the publisher (the browser
-        swaps overlay URLs from the published ``leadtimeCogUrls`` cache while
-        scrubbing). Confirms that arrive while playing are dropped unless
-        ``force`` is set (init-day rewind). Polar modes that lack a TiTiler TMS
-        fall back to global Web Mercator and the view-mode control is synced.
+        Item tiles are painted in the browser from ``/api/search``. This
+        callback must not load the same Item or overwrite ``map-state``.
         """
         if not isinstance(map_request, dict):
             if not (map_state or {}).get("layers"):
@@ -1725,324 +1237,7 @@ def register_callbacks(app: dash.Dash):
             )
             return cleared, [], no_update, no_update
 
-        collection_ids = map_request.get("collection") or []
-        forecast_start_date = map_request.get("forecast_start")
-        band_index = map_request.get("variable")
-        colormap = map_request.get("colormap")
-        map_view_mode = map_request.get("view_mode")
-        leadtime = map_request.get("lead", 0)
-        force_stats = bool(map_request.get("force_stats"))
-        clear_lock = bool(map_request.get("clear_lock"))
-        leadtime_only = bool(map_request.get("leadtime_only"))
-        tms_only = bool(map_request.get("tms_only"))
-        colormap_only = bool(map_request.get("colormap_only"))
-
-        style = normalise_display_style(display_style)
-        locked = bool(style.get("locked"))
-
-        # The browser owns the frame while playing; confirming every step
-        # would queue a Python rebuild behind each tick.
-        if leadtime_only and leadtime_playing:
-            return no_update, no_update, no_update, no_update
-
-        # Drop paints for a TMS the user has already left (queued map-request).
-        if (
-            live_view_mode
-            and map_view_mode
-            and live_view_mode != map_view_mode
-        ):
-            return no_update, no_update, no_update, no_update
-
-        # A new variable must not keep a pinned range from the previous band.
-        if clear_lock and locked:
-            locked = False
-            style["locked"] = False
-            style["source"] = "stats"
-
-        # Leadtime confirms should honour the ramp already on screen
-        # (display-style / soft-swap cache). map-request.colormap can lag after
-        # locked colormap edits, which skip publish_map_request.
-        # All other paints take the request first so unlocked colormap_only
-        # applies before display-style is rewritten in this same callback.
-        if leadtime_only:
-            active_colormap = resolve_live_colormap(
-                style.get("colormap"),
-                colormap,
-            )
-        else:
-            active_colormap = resolve_live_colormap(
-                colormap,
-                style.get("colormap"),
-            )
-
-        ui_mode = map_view_mode or MapViewMode.GLOBAL_3857.value
-        requested_mode, _ = resolve_mode_and_engine(ui_mode)
-
-        resolved_mode, view = view_mode_and_hint(requested_mode, TILER_INTERNAL_URL)
-        mode = resolved_mode
-        engine = resolve_engine_for_mode(mode)
-        # Sync the view-mode control when mode was adjusted (TMS fallback).
-        mode_control = mode if mode != ui_mode else no_update
-        try:
-            tile_matrix_set = tile_matrix_set_for_mode(mode)
-        except ValueError:
-            tile_matrix_set = WEB_MERCATOR_QUAD
-            mode = MapViewMode.GLOBAL_3857.value
-            view = view_mode_and_hint(mode, TILER_INTERNAL_URL)[1]
-            engine = resolve_engine_for_mode(mode)
-            mode_control = mode if mode != ui_mode else no_update
-
-        def _publish(layer_entries, next_style, *, leadtime_cog_urls):
-            logging.debug(
-                "painting map-request rev=%s layers=%s mode=%s",
-                map_request.get("revision"),
-                len(layer_entries or []),
-                mode,
-            )
-            next_state = build_map_state(
-                previous=map_state,
-                engine=engine,
-                mode=mode,
-                layers=layer_entries,
-                view=view,
-                leadtime_cog_urls=leadtime_cog_urls,
-                lead=leadtime,
-                # Warm the next step so a play tick or a forward scrub finds
-                # the tiles already in the browser and tiler caches.
-                prefetch_layers=layers_from_leadtime_cog_urls(
-                    leadtime_cog_urls, (leadtime or 0) + 1
-                ),
-            )
-            leaflet_children = (
-                _build_leaflet_overlays(layer_entries)
-                if engine == MapEngine.LEAFLET_LEGACY.value
-                else []
-            )
-            return (
-                next_state,
-                leaflet_children,
-                next_style,
-                mode_control,
-            )
-
-        # Incomplete recipes should not stamp an empty map-state (prefs
-        # rehydration used to leave the map blank that way).
-        if not forecast_start_date or band_index is None or not collection_ids:
-            return no_update, no_update, no_update, no_update
-
-        stac = _get_stac_client()
-        forecast_reference_time_str = date_picker_to_reference_time(
-            forecast_start_date
-        )
-        leadtime = 0 if leadtime is None else leadtime
-
-        def _layers_for_scale(min_val, max_val):
-            return _build_forecast_layer_entries(
-                stac,
-                collection_ids,
-                forecast_reference_time_str,
-                leadtime,
-                band_index,
-                active_colormap,
-                min_val,
-                max_val,
-                tile_matrix_set=tile_matrix_set,
-                view_mode=mode,
-            )
-
-        def _cog_urls_for_scale(min_val, max_val):
-            return _build_leadtime_cog_urls(
-                stac,
-                collection_ids,
-                forecast_reference_time_str,
-                band_index,
-                active_colormap,
-                min_val,
-                max_val,
-                tile_matrix_set,
-                mode,
-            )
-
-        def _style_for(min_val, max_val, *, source: str):
-            next_style = dict(style)
-            next_style["colormap"] = active_colormap
-            next_style["vmin"] = float(min_val)
-            next_style["vmax"] = float(max_val)
-            next_style["source"] = source
-            # Keep a user pin across rebuilds that reused the pinned window.
-            next_style["locked"] = source == "user"
-            if source == "stats":
-                next_style["domain_min"] = float(min_val)
-                next_style["domain_max"] = float(max_val)
-            else:
-                # Keep the prior domain; expand it if the window moves outside.
-                dmin = float(next_style.get("domain_min", min_val))
-                dmax = float(next_style.get("domain_max", max_val))
-                next_style["domain_min"] = min(dmin, float(min_val))
-                next_style["domain_max"] = max(dmax, float(max_val))
-            return next_style
-
-        # TMS / view-mode switch: rebuild overlays for the new TileMatrixSet and
-        # hemisphere filter. Rewriting only the TMS id leaves unfit collections
-        # cached and blanks polar to global / globe switches.
-        if tms_only:
-            if "vmin" in style and "vmax" in style:
-                layer_entries = _layers_for_scale(style["vmin"], style["vmax"])
-                if layer_entries:
-                    return _publish(
-                        layer_entries,
-                        no_update,
-                        leadtime_cog_urls=_cog_urls_for_scale(
-                            style["vmin"], style["vmax"]
-                        ),
-                    )
-            # No reusable style yet - fall through to the full catalogue rebuild.
-        # Colour map only, unlocked: reuse the current range from display-style.
-        if colormap_only and not locked:
-            layer_entries = _layers_for_scale(style["vmin"], style["vmax"])
-            if not layer_entries:
-                return no_update, no_update, no_update, no_update
-            return _publish(
-                layer_entries,
-                _style_for(
-                    style["vmin"],
-                    style["vmax"],
-                    source=style.get("source") or "stats",
-                ),
-                leadtime_cog_urls=_cog_urls_for_scale(style["vmin"], style["vmax"]),
-            )
-
-        # Leadtime scrub/play: keep the current colour scale. Never re-query
-        # band stats mid-animation (or while scrubbing with a known or pinned
-        # scale).
-        reuse_leadtime_scale = (
-            not force_stats
-            and leadtime_only
-            and (
-                bool(leadtime_playing)
-                or ("vmin" in style and "vmax" in style)
-                or locked
-            )
-        )
-        if reuse_leadtime_scale:
-            min_val = style.get("vmin")
-            max_val = style.get("vmax")
-            if min_val is not None and max_val is not None:
-                cached_cog_urls = (map_state or {}).get("leadtimeCogUrls")
-                if leadtime_cog_urls_match_style(
-                    cached_cog_urls,
-                    tile_matrix_set=tile_matrix_set,
-                    colormap=active_colormap,
-                    rescale=(float(min_val), float(max_val)),
-                    band_index=band_index,
-                    collection_ids=collection_ids,
-                ):
-                    # The published cache already covers this step: build the
-                    # overlay URLs from it instead of walking the catalogue.
-                    layer_entries = layers_from_leadtime_cog_urls(
-                        cached_cog_urls, leadtime
-                    )
-                    if layer_entries:
-                        return _publish(
-                            layer_entries,
-                            no_update,
-                            leadtime_cog_urls=cached_cog_urls,
-                        )
-                layer_entries = _layers_for_scale(min_val, max_val)
-                if not layer_entries:
-                    return no_update, no_update, no_update, no_update
-                return _publish(
-                    layer_entries,
-                    no_update,
-                    leadtime_cog_urls=_cog_urls_for_scale(min_val, max_val),
-                )
-
-        # Collect hrefs first so we can resolve one shared display range, then
-        # build layers.
-        min_vals: list[float] = []
-        max_vals: list[float] = []
-        layer_specs: list[tuple[str, Asset, str]] = []
-
-        for collection_id in collection_ids or []:
-            try:
-                if not _collection_fits_view_mode(stac, collection_id, mode):
-                    logging.info(
-                        "Skipping collection %s: does not fit view mode %s",
-                        collection_id,
-                        mode,
-                    )
-                    continue
-
-                # Get COG assets for this collection and date
-                cogs = stac.get_item_cogs(
-                    collection_id, forecast_reference_time_str
-                )
-                cog_assets = list(cogs.values())
-                if leadtime >= len(cog_assets):
-                    logging.warning(
-                        "Leadtime %s out of range for %s", leadtime, collection_id
-                    )
-                    continue
-                cog_asset = cog_assets[leadtime]
-                layer_specs.append((collection_id, cog_asset, cog_asset.href))
-
-                # Determine rescale range: a user pin wins unless this is a
-                # forced Auto reset, otherwise resolve fresh statistics.
-                if locked and not force_stats:
-                    min_val = style["vmin"]
-                    max_val = style["vmax"]
-                else:
-                    # Prefer Item STATISTICS_*; fall back to TiTiler /cog/statistics
-                    min_val, max_val = _resolve_band_minmax(
-                        stac, cog_asset, band_index, cog_asset.href
-                    )
-
-                min_vals.append(round_2dp(min_val))
-                max_vals.append(round_2dp(max_val))
-            except Exception as e:
-                # Handle exception where this collection does not have the selected date
-                logging.error(
-                    "Error processing collection %s: %s", collection_id, e
-                )
-                continue
-
-        if not layer_specs or not min_vals:
-            # View-mode change with no fitting collections: clear overlays only
-            # when we already had some (avoid stamping empty map-state on boot).
-            if tms_only and (map_state or {}).get("layers"):
-                return _publish([], no_update, leadtime_cog_urls=None)
-            return no_update, no_update, no_update, no_update
-
-        min_val = min(min_vals)
-        max_val = max(max_vals)
-
-        layer_entries = _build_forecast_layer_entries(
-            stac,
-            [spec[0] for spec in layer_specs],
-            forecast_reference_time_str,
-            leadtime,
-            band_index,
-            active_colormap,
-            min_val,
-            max_val,
-            tile_matrix_set=tile_matrix_set,
-            view_mode=mode,
-        )
-        if not layer_entries:
-            if tms_only and (map_state or {}).get("layers"):
-                return _publish([], no_update, leadtime_cog_urls=None)
-            return no_update, no_update, no_update, no_update
-
-        next_style = _style_for(
-            min_val,
-            max_val,
-            source="user" if (locked and not force_stats) else "stats",
-        )
-        return _publish(
-            layer_entries,
-            next_style,
-            leadtime_cog_urls=_cog_urls_for_scale(min_val, max_val),
-        )
+        return no_update, no_update, no_update, no_update
 
     @app.callback(
         Output("map-state", "data", allow_duplicate=True),
@@ -2097,6 +1292,35 @@ def register_callbacks(app: dash.Dash):
             else []
         )
         return next_state, leaflet_children
+
+    @app.callback(
+        Output("cog-results-layer", "children", allow_duplicate=True),
+        Input("map-state", "data"),
+        State("cog-results-layer", "children"),
+        prevent_initial_call=True,
+    )
+    def sync_leaflet_overlays(map_state, current_children):
+        """
+        Build Leaflet Overlay children from published ``map-state``.
+
+        Same layer count keeps the existing TileLayers so play can swap
+        URLs in place. Count or engine changes rebuild or clear.
+        """
+        if not isinstance(map_state, dict):
+            raise PreventUpdate
+        if map_state.get("engine") != MapEngine.LEAFLET_LEGACY.value:
+            if current_children:
+                return []
+            raise PreventUpdate
+        layers = map_state.get("layers") or []
+        if not layers:
+            if current_children:
+                return []
+            raise PreventUpdate
+        n = len(current_children) if current_children else 0
+        if n == len(layers):
+            raise PreventUpdate
+        return _build_leaflet_overlays(layers)
 
     @app.callback(
         Output("controls-column", "className"),

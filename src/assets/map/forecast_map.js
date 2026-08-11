@@ -170,7 +170,11 @@
   function endDashMapWait() {
     var label = busyLabelEl();
     var text = label ? String(label.textContent || "") : "";
-    if (/^Updating /.test(text) || text === "Updating…") {
+    if (
+      /^Updating /.test(text) ||
+      text === "Updating…" ||
+      /^Loading variables/.test(text)
+    ) {
       hideBusyChrome();
     }
   }
@@ -265,20 +269,18 @@
   }
 
   /**
-   * Build overlay layers for one leadtime from the published COG URL cache.
+   * Build overlay layers for one leadtime from the published Item cache.
    *
-   * Mirrors `layers_from_leadtime_cog_urls` in Python so a client-side swap
-   * and a Python confirm produce the same tile URLs.
+   * Mirrors `layers_from_leadtime_cog_urls`. Scrubbing only changes ``assets=``.
    */
   function layersFromLeadtimeCogUrls(cache, lead) {
     if (!cache || !cache.collections || lead == null || lead < 0) {
       return [];
     }
-    var tilerBase = cache.tilerBase;
-    if (!tilerBase) {
+    if (!cache.tilerBase) {
       return [];
     }
-    var tms = cache.tileMatrixSet || "WebMercatorQuad";
+    var viewMode = cache.viewMode || (lastState && lastState.mode) || "";
     var layers = [];
     var ids = Object.keys(cache.collections);
     var i;
@@ -286,15 +288,13 @@
       var id = ids[i];
       var meta = cache.collections[id];
       var hrefs = meta && meta.hrefs;
-      if (!hrefs || lead >= hrefs.length || !hrefs[lead]) {
+      if (!meta || !meta.itemId || !hrefs || lead >= hrefs.length || !hrefs[lead]) {
         continue;
       }
-      var tileUrl =
-        tilerBase.replace(/\/$/, "") +
-        "/cog/tiles/" +
-        tms +
-        "/{z}/{x}/{y}.webp?url=" +
-        hrefs[lead];
+      if (!bboxFitsViewMode(meta.bbox, viewMode)) {
+        continue;
+      }
+      var tileUrl = itemTileUrl(cache, id, meta.itemId, hrefs[lead]);
       if (cache.colormap) {
         tileUrl += "&colormap_name=" + cache.colormap;
       }
@@ -305,9 +305,6 @@
           "," +
           formatRescaleBound(cache.rescale[1]);
       }
-      if (cache.bidx != null) {
-        tileUrl += "&bidx=" + cache.bidx;
-      }
       layers.push({
         id: id,
         title: id,
@@ -315,9 +312,53 @@
         opacity: 1,
         visible: true,
         bbox: meta.bbox || null,
+        gsd: meta.gsd > 0 ? Number(meta.gsd) : undefined,
       });
     }
     return layers;
+  }
+
+  function itemTileUrl(cache, collectionId, itemId, assetKey) {
+    var assets = encodeURIComponent(assetKey);
+    if (cache.bidx != null) {
+      assets += encodeURIComponent("|bidx=" + cache.bidx);
+    }
+    return (
+      cache.tilerBase.replace(/\/$/, "") +
+      "/collections/" +
+      encodeURIComponent(collectionId) +
+      "/items/" +
+      encodeURIComponent(itemId) +
+      "/tiles/" +
+      (cache.tileMatrixSet || "WebMercatorQuad") +
+      "/{z}/{x}/{y}.webp?assets=" +
+      assets
+    );
+  }
+
+  function bboxFitsViewMode(bbox, mode) {
+    if (
+      !mode ||
+      mode === "global_3857" ||
+      mode === "global_leaflet" ||
+      mode === "globe_cesium"
+    ) {
+      return true;
+    }
+    if (!bbox || bbox.length < 4) {
+      return true;
+    }
+    var centre = (Number(bbox[1]) + Number(bbox[3])) / 2;
+    if (!isFinite(centre)) {
+      return true;
+    }
+    if (mode === "EPSG6931") {
+      return centre > 0;
+    }
+    if (mode === "EPSG6932") {
+      return centre < 0;
+    }
+    return true;
   }
 
   function hasLeadtimeCogUrls() {
@@ -524,6 +565,7 @@
         lead: nextLead,
       });
       setTilesReady(true);
+      publishDashMapState();
       return true;
     }
     var previousLead = lastState.lead;
@@ -537,6 +579,7 @@
       layers: layers,
       lead: nextLead,
     });
+    publishDashMapState();
     // Same contract on OpenLayers and Cesium. Play does not show a banner.
     // Scrub shows "Loading tiles…" if the step is still waiting after 1s,
     // and keeps it until those tiles have painted.
@@ -568,28 +611,10 @@
     // Leaflet has no soft-swap here: Dash TileLayer URL updates via set_props
     // keep Global play moving (may flicker between frames).
     if (activeEngine === "leaflet_legacy" || currentEngine() === "leaflet_legacy") {
-      if (
-        global.dash_clientside &&
-        typeof global.dash_clientside.set_props === "function"
-      ) {
-        var li;
-        for (li = 0; li < layers.length; li += 1) {
-          if (!layers[li] || !layers[li].tileUrl) {
-            continue;
-          }
-          global.dash_clientside.set_props(
-            { type: "cog-collections", index: li },
-            {
-              url: layers[li].tileUrl,
-              opacity:
-                layers[li].opacity == null ? 1 : layers[li].opacity,
-            }
-          );
-        }
-        setTilesReady(true);
-        schedulePrefetch(lastState);
-        return true;
-      }
+      syncLeafletOverlayUrls(layers);
+      setTilesReady(true);
+      schedulePrefetch(lastState);
+      return true;
     }
     // Unknown host: clear the play gate so ticks are not stuck waiting.
     setTilesReady(true);
@@ -755,8 +780,8 @@
     // New frame: block play until the renderer calls setTilesReady(true).
     // Leaflet has no shared load hook here - treat as ready after apply.
     // Soft-swap rebuilds own the banner; scrub never calls this path.
-    // A view-mode switch publishes empty overlays until Python rebuilds
-    // URLs; keep "Loading tiles…" up through that gap.
+    // A TMS switch clears the previous overlay immediately; keep
+    // "Loading tiles…" up until the new grid has painted.
     var modeChanged =
       previous &&
       ((previous.engine || "openlayers") !== engine ||
@@ -834,15 +859,18 @@
    * Apply a view-mode change immediately (engine + view preset).
    *
    * ``presets`` is ``{ mode: viewHint }`` from the Dash store, including polar
-   * tile-grid hints so Arctic/Antarctic do not wait on Python. Overlay layers
-   * are cleared until Python rebuilds URLs for the new TMS (do not rewrite
-   * TileMatrixSet client-side; that mismatched CRS and tiles).
+   * tile-grid hints so Arctic/Antarctic do not wait on Python. The previous
+   * overlay is dropped immediately so a Web Mercator layer cannot sit on a
+   * polar grid while the new tiles load.
    */
   function applyViewMode(mode, presets) {
-    if (!mode || !lastState) {
+    if (!mode) {
       return;
     }
     desiredMode = mode;
+    if (!lastState) {
+      return;
+    }
     if (mode === (lastState.mode || "")) {
       // Same TMS / view mode: restore that mode's default framing.
       resetView();
@@ -856,27 +884,31 @@
     // Always take the preset for this mode. Reusing lastState.view when switching
     // to Global reused the polar camera and looked like "the other" TMS.
     var view = presets && presets[mode] ? presets[mode] : null;
-    if (!view) {
-      // No preset yet: drop overlays only; Python will publish the matching view.
-      applyState(
-        Object.assign({}, lastState, {
-          layers: [],
-          leadtimeCogUrls: null,
-          revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
-        })
+    var cache = lastState.leadtimeCogUrls;
+    var nextCache = null;
+    var nextLayers = [];
+    if (cache && cache.collections) {
+      nextCache = Object.assign({}, cache, {
+        tileMatrixSet: tmsForMode(mode),
+        viewMode: mode,
+      });
+      nextLayers = layersFromLeadtimeCogUrls(
+        nextCache,
+        lastState.lead != null ? lastState.lead : 0
       );
-      return;
     }
+    // Never keep the previous TMS painted on the new grid.
     applyState(
       Object.assign({}, lastState, {
         engine: engine,
         mode: mode,
-        layers: [],
-        leadtimeCogUrls: null,
-        view: view,
+        layers: nextLayers,
+        leadtimeCogUrls: nextCache,
+        view: view || lastState.view,
         revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
       })
     );
+    publishDashMapState();
   }
 
   var LEAFLET_WORLD_BOUNDS = [
@@ -1910,6 +1942,572 @@
     });
   }
 
+  var forecastAbort = null;
+  var forecastSearchGen = 0;
+  var lastForecastSearchKey = "";
+  var lastForecastItems = null;
+
+  function collectionIdList(value) {
+    if (!value) {
+      return [];
+    }
+    if (Array.isArray(value)) {
+      return value.filter(Boolean);
+    }
+    return [value];
+  }
+
+  function dateToRefTime(day) {
+    if (!day || typeof day !== "string") {
+      return null;
+    }
+    return day.indexOf("T") === -1 ? day + "T00:00:00Z" : day;
+  }
+
+  function publicTilerBase() {
+    if (lastState && lastState.leadtimeCogUrls && lastState.leadtimeCogUrls.tilerBase) {
+      return lastState.leadtimeCogUrls.tilerBase;
+    }
+    var origin =
+      global.location && global.location.origin ? global.location.origin : "";
+    return origin + "/tiles";
+  }
+
+  function isDataCog(asset) {
+    if (!asset || typeof asset !== "object") {
+      return false;
+    }
+    var roles = asset.roles || [];
+    var media = String(asset.type || asset.media_type || "").toLowerCase();
+    return roles.indexOf("data") !== -1 || media.indexOf("cog") !== -1;
+  }
+
+  var WEB_MERCATOR_Z0 = 156543.03392804097;
+
+  function gsdFromAssets(assets) {
+    var keys = Object.keys(assets || {});
+    var i;
+    for (i = 0; i < keys.length; i += 1) {
+      var asset = assets[keys[i]];
+      if (!isDataCog(asset)) {
+        continue;
+      }
+      var transform = asset["proj:transform"];
+      var gsd = transform && transform.length
+        ? Math.abs(Number(transform[0]))
+        : Number(asset.gsd);
+      if (isFinite(gsd) && gsd > 0) {
+        return gsd;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Highest TMS zoom to fetch for a COG.
+   *
+   * Native resolution is where the cell matches ``gsd``. A fitted world or
+   * polar view is often already near that, so allow several extra octaves
+   * for zoom-in before stretching. Extreme zooms (empty 25 km cells at
+   * z=16) are still skipped.
+   */
+  function maxZoomForGsd(gsd, resolutions) {
+    var size = Number(gsd);
+    if (!isFinite(size) || size <= 0) {
+      return null;
+    }
+    var minCell = size / 32;
+    var i;
+    if (resolutions && resolutions.length) {
+      for (i = 0; i < resolutions.length; i += 1) {
+        if (resolutions[i] < minCell) {
+          return Math.max(0, i - 1);
+        }
+      }
+      return resolutions.length - 1;
+    }
+    for (i = 0; i <= 22; i += 1) {
+      if (WEB_MERCATOR_Z0 / Math.pow(2, i) < minCell) {
+        return Math.max(0, i - 1);
+      }
+    }
+    return null;
+  }
+
+  function orderedAssetKeys(assets) {
+    var rows = [];
+    Object.keys(assets || {}).forEach(function (key) {
+      if (!isDataCog(assets[key])) {
+        return;
+      }
+      var parsed = Date.parse(key);
+      if (!isFinite(parsed)) {
+        return;
+      }
+      rows.push({ key: key, t: parsed });
+    });
+    rows.sort(function (a, b) {
+      return a.t - b.t;
+    });
+    return rows.map(function (row) {
+      return row.key;
+    });
+  }
+
+  function bandsFromAssets(assets) {
+    var keys = Object.keys(assets || {});
+    var i;
+    for (i = 0; i < keys.length; i += 1) {
+      var asset = assets[keys[i]];
+      if (!isDataCog(asset)) {
+        continue;
+      }
+      var bandProps = asset["forecast:bands"] || [];
+      if (!bandProps.length) {
+        continue;
+      }
+      var bands = {};
+      var bi;
+      for (bi = 0; bi < bandProps.length; bi += 1) {
+        var band = bandProps[bi];
+        if (band && band.name != null && band.index != null) {
+          bands[String(band.name)] = Number(band.index);
+        }
+      }
+      if (Object.keys(bands).length) {
+        return { bands: bands, bandProps: bandProps };
+      }
+    }
+    return { bands: {}, bandProps: [] };
+  }
+
+  function rescaleFromBands(bandProps, bandIndex) {
+    var i;
+    for (i = 0; i < (bandProps || []).length; i += 1) {
+      var band = bandProps[i];
+      if (!band || Number(band.index) !== Number(bandIndex)) {
+        continue;
+      }
+      var minimum = band.STATISTICS_MINIMUM;
+      var maximum = band.STATISTICS_MAXIMUM;
+      if (minimum == null || maximum == null) {
+        return null;
+      }
+      return [Number(minimum), Number(maximum)];
+    }
+    return null;
+  }
+
+  function inferStepUnit(times) {
+    if (!times || times.length < 2) {
+      return "day";
+    }
+    var gaps = [];
+    var i;
+    for (i = 1; i < times.length; i += 1) {
+      var delta = Date.parse(times[i]) - Date.parse(times[i - 1]);
+      if (isFinite(delta) && delta > 0) {
+        gaps.push(delta / 1000);
+      }
+    }
+    if (!gaps.length) {
+      return "day";
+    }
+    var median = gaps.slice().sort(function (a, b) {
+      return a - b;
+    })[Math.floor(gaps.length / 2)];
+    var day = 86400;
+    if (median < day * 0.75) {
+      return "hour";
+    }
+    if (median < 7 * day * 0.75) {
+      return "day";
+    }
+    if (median < 30 * day * 0.75) {
+      return "week";
+    }
+    return "month";
+  }
+
+  function publishDashMapState() {
+    if (!lastState) {
+      return;
+    }
+    setDashProps("map-state", { data: lastState });
+  }
+
+  function syncLeafletOverlayUrls(layers) {
+    if (
+      activeEngine !== "leaflet_legacy" &&
+      currentEngine() !== "leaflet_legacy"
+    ) {
+      return;
+    }
+    if (
+      !global.dash_clientside ||
+      typeof global.dash_clientside.set_props !== "function"
+    ) {
+      return;
+    }
+    var li;
+    for (li = 0; li < (layers || []).length; li += 1) {
+      if (!layers[li] || !layers[li].tileUrl) {
+        continue;
+      }
+      global.dash_clientside.set_props(
+        { type: "cog-collections", index: li },
+        {
+          url: layers[li].tileUrl,
+          opacity: layers[li].opacity == null ? 1 : layers[li].opacity,
+        }
+      );
+    }
+  }
+
+  function setDashProps(id, props) {
+    if (
+      global.dash_clientside &&
+      typeof global.dash_clientside.set_props === "function"
+    ) {
+      global.dash_clientside.set_props(id, props);
+    }
+  }
+
+  function paintLeadtimeCache(cache, lead) {
+    var nextLead = lead == null ? 0 : Number(lead);
+    var layers = layersFromLeadtimeCogUrls(cache, nextLead);
+    if (!layers.length) {
+      return false;
+    }
+    var mode =
+      desiredMode ||
+      cache.viewMode ||
+      (lastState && lastState.mode) ||
+      "global_3857";
+    var base = lastState || {};
+    // Full applyState so a globe switch that has not yet painted still
+    // creates Cesium imagery. Scrub continues to use applyLeadtimeIndex.
+    applyState(
+      Object.assign({}, base, {
+        engine: engineForMode(mode),
+        mode: mode,
+        layers: layers,
+        leadtimeCogUrls: cache,
+        lead: nextLead,
+        view: base.view,
+        revision: LOCAL_REVISION_BASE + (base.revision || 0) + 1,
+      })
+    );
+    publishDashMapState();
+    syncLeafletOverlayUrls(layers);
+    return true;
+  }
+
+  /**
+   * One slim STAC search per date / collection. Fills the leadtime axis and
+   * variables, then paints Item tiles without waiting on Dash.
+   */
+  function loadForecast(options) {
+    var opts = options || {};
+    var day = opts.date;
+    var ids = collectionIdList(opts.collections);
+    var datetime = dateToRefTime(day);
+    if (!ids.length) {
+      lastForecastSearchKey = "";
+      if (forecastAbort && typeof forecastAbort.abort === "function") {
+        forecastAbort.abort();
+      }
+      if (lastState && (lastState.layers || lastState.leadtimeCogUrls)) {
+        applyState(
+          Object.assign({}, lastState, {
+            layers: [],
+            leadtimeCogUrls: null,
+            revision: LOCAL_REVISION_BASE + (lastState.revision || 0) + 1,
+          })
+        );
+        publishDashMapState();
+      }
+      hideBusyChrome();
+      return;
+    }
+    if (!datetime) {
+      hideBusyChrome();
+      return;
+    }
+    var searchKey = ids.join(",") + "|" + datetime;
+    if (searchKey === lastForecastSearchKey && hasLeadtimeCogUrls()) {
+      if (opts.variable != null && lastState && lastState.leadtimeCogUrls) {
+        applyBand(opts.variable, opts.displayStyle);
+      }
+      return;
+    }
+    if (forecastAbort && typeof forecastAbort.abort === "function") {
+      forecastAbort.abort();
+    }
+    forecastAbort =
+      typeof AbortController === "function" ? new AbortController() : null;
+    var gen = (forecastSearchGen += 1);
+    var signal = forecastAbort ? forecastAbort.signal : undefined;
+    fetch("/api/search", {
+      method: "POST",
+      headers: {
+        Accept: "application/geo+json, application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        collections: ids,
+        "filter-lang": "cql2-json",
+        filter: {
+          op: "=",
+          args: [{ property: "datetime" }, { timestamp: datetime }],
+        },
+        limit: ids.length,
+        fields: {
+          include: ["id", "bbox", "collection", "assets"],
+          exclude: ["geometry", "links", "assets.*.href", "assets.*.alternate"],
+        },
+      }),
+      signal: signal,
+    })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("STAC search failed");
+        }
+        return response.json();
+      })
+      .then(function (body) {
+        if (gen !== forecastSearchGen) {
+          return;
+        }
+        var features = (body && body.features) || [];
+        if (!features.length) {
+          endDashMapWait();
+          return;
+        }
+        applySearchFeatures(features, {
+          date: day,
+          datetime: datetime,
+          collections: ids,
+          variable: opts.variable,
+          colormap: opts.colormap,
+          viewMode: opts.viewMode,
+          displayStyle: opts.displayStyle,
+        });
+        lastForecastSearchKey = searchKey;
+      })
+      .catch(function (error) {
+        if (error && error.name === "AbortError") {
+          return;
+        }
+        if (gen === forecastSearchGen) {
+          lastForecastSearchKey = "";
+          endDashMapWait();
+        }
+      });
+  }
+
+  function applySearchFeatures(features, opts) {
+    var collections = {};
+    var shortestTimes = null;
+    var bandTable = { bands: {}, bandProps: [] };
+    var i;
+    for (i = 0; i < features.length; i += 1) {
+      var feature = features[i];
+      var collectionId = feature.collection || (opts.collections || [])[0];
+      if (!collectionId || !feature.id) {
+        continue;
+      }
+      var assets = feature.assets || {};
+      var keys = orderedAssetKeys(assets);
+      if (!keys.length) {
+        continue;
+      }
+      if (!Object.keys(bandTable.bands).length) {
+        bandTable = bandsFromAssets(assets);
+      }
+      collections[collectionId] = {
+        hrefs: keys,
+        itemId: feature.id,
+        bbox: feature.bbox || null,
+      };
+      var gsd = gsdFromAssets(assets);
+      if (gsd) {
+        collections[collectionId].gsd = gsd;
+      }
+      if (!shortestTimes || keys.length < shortestTimes.length) {
+        shortestTimes = keys;
+      }
+    }
+    if (!Object.keys(collections).length || !shortestTimes) {
+      endDashMapWait();
+      return;
+    }
+    lastForecastItems = { collections: collections, bands: bandTable };
+    var times = shortestTimes;
+    setDashProps("leadtime-axis", {
+      data: { times: times, step_unit: inferStepUnit(times) },
+    });
+    var bandIndex = resolveBandIndex(bandTable.bands, opts.variable);
+    var previousStyle = opts.displayStyle || {};
+    var rescale = null;
+    if (previousStyle.locked && previousStyle.vmin != null && previousStyle.vmax != null) {
+      rescale = [Number(previousStyle.vmin), Number(previousStyle.vmax)];
+    } else {
+      rescale = rescaleFromBands(bandTable.bandProps, bandIndex);
+    }
+    if (!rescale) {
+      rescale =
+        previousStyle.vmin != null && previousStyle.vmax != null
+          ? [Number(previousStyle.vmin), Number(previousStyle.vmax)]
+          : [0, 1];
+    }
+    var colormap =
+      opts.colormap || previousStyle.colormap || "blues_r";
+    if (!previousStyle.locked) {
+      setDashProps("display-style", {
+        data: {
+          colormap: colormap,
+          vmin: rescale[0],
+          vmax: rescale[1],
+          domain_min: rescale[0],
+          domain_max: rescale[1],
+          locked: false,
+          source: "stats",
+        },
+      });
+    }
+    var mode = opts.viewMode || desiredMode || (lastState && lastState.mode) || "";
+    var cache = {
+      tilerBase: publicTilerBase(),
+      tileMatrixSet: tmsForMode(mode),
+      viewMode: mode,
+      colormap: colormap,
+      rescale: rescale,
+      bidx: bandIndex,
+      refTime: opts.datetime,
+      collections: collections,
+    };
+    setDashProps("forecast-item-client", {
+      data: {
+        date: opts.date,
+        collections: Object.keys(collections),
+        ts: Date.now(),
+      },
+    });
+    paintLeadtimeCache(cache, 0);
+    if (Object.keys(bandTable.bands).length) {
+      var options = Object.keys(bandTable.bands).map(function (name) {
+        return { label: name, value: bandTable.bands[name] };
+      });
+      setDashProps("variable-dropdown", {
+        options: options,
+        value: bandIndex,
+      });
+    }
+  }
+
+  function resolveBandIndex(bands, preferred) {
+    var values = Object.keys(bands || {}).map(function (name) {
+      return bands[name];
+    });
+    if (preferred != null && values.indexOf(Number(preferred)) !== -1) {
+      return Number(preferred);
+    }
+    if (preferred != null && values.indexOf(preferred) !== -1) {
+      return preferred;
+    }
+    return values.length ? values[0] : null;
+  }
+
+  function applyBand(bandIndex, displayStyle) {
+    if (!lastState || !lastState.leadtimeCogUrls || bandIndex == null) {
+      return;
+    }
+    var cache = Object.assign({}, lastState.leadtimeCogUrls);
+    if (Number(cache.bidx) === Number(bandIndex)) {
+      return;
+    }
+    cache.bidx = Number(bandIndex);
+    var style = displayStyle || {};
+    // A new variable must not keep a pinned range from the previous band.
+    if (lastForecastItems && lastForecastItems.bands) {
+      var rescale = rescaleFromBands(
+        lastForecastItems.bands.bandProps,
+        cache.bidx
+      );
+      if (rescale) {
+        cache.rescale = rescale;
+        setDashProps("display-style", {
+          data: {
+            colormap: cache.colormap || style.colormap || "blues_r",
+            vmin: rescale[0],
+            vmax: rescale[1],
+            domain_min: rescale[0],
+            domain_max: rescale[1],
+            locked: false,
+            source: "stats",
+          },
+        });
+      }
+    }
+    paintLeadtimeCache(cache, lastState.lead || 0);
+  }
+
+  function applyStyle(style) {
+    if (!lastState || !lastState.leadtimeCogUrls || !style) {
+      return;
+    }
+    var cache = lastState.leadtimeCogUrls;
+    var nextCmap = style.colormap || cache.colormap;
+    var nextScale =
+      style.vmin != null && style.vmax != null
+        ? [Number(style.vmin), Number(style.vmax)]
+        : cache.rescale;
+    if (
+      nextCmap === cache.colormap &&
+      cache.rescale &&
+      nextScale &&
+      Number(cache.rescale[0]) === Number(nextScale[0]) &&
+      Number(cache.rescale[1]) === Number(nextScale[1])
+    ) {
+      return;
+    }
+    cache = Object.assign({}, cache, {
+      colormap: nextCmap,
+      rescale: nextScale,
+    });
+    paintLeadtimeCache(cache, lastState.lead || 0);
+  }
+
+  function applyAutoScale() {
+    if (!lastState || !lastState.leadtimeCogUrls || !lastForecastItems) {
+      return;
+    }
+    var cache = lastState.leadtimeCogUrls;
+    var rescale = rescaleFromBands(
+      lastForecastItems.bands && lastForecastItems.bands.bandProps,
+      cache.bidx
+    );
+    if (!rescale) {
+      return;
+    }
+    setDashProps("display-style", {
+      data: {
+        colormap: cache.colormap || "blues_r",
+        vmin: rescale[0],
+        vmax: rescale[1],
+        domain_min: rescale[0],
+        domain_max: rescale[1],
+        locked: false,
+        source: "stats",
+      },
+    });
+    paintLeadtimeCache(
+      Object.assign({}, cache, { rescale: rescale }),
+      lastState.lead || 0
+    );
+  }
+
   ensureMapSearchKeys();
   ensureViewModeResetClick();
   ensureRegionUpload();
@@ -1921,9 +2519,14 @@
     layersFromLeadtimeCogUrls: layersFromLeadtimeCogUrls,
     hasLeadtimeCogUrls: hasLeadtimeCogUrls,
     clearLeadtimeCogUrls: clearLeadtimeCogUrls,
+    loadForecast: loadForecast,
+    applyBand: applyBand,
+    applyStyle: applyStyle,
+    applyAutoScale: applyAutoScale,
     setTilesReady: setTilesReady,
     isTilesReady: isTilesReady,
     prefetchTileImages: prefetchTileImages,
+    maxZoomForGsd: maxZoomForGsd,
     setBusy: setBusy,
     clearBusy: clearBusy,
     flyTo: flyTo,
