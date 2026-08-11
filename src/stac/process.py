@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 # All gunicorn workers share this store via diskcache's file-locking protocol,
 # so each STAC API round-trip happens at most once across the process group.
 _CACHE_DIR = os.environ.get("STAC_DISK_CACHE_DIR", "/tmp/stac-dashboard-cache")
+# How long a cached row stays valid. After this the next read asks the
+# API again, so a re-ingest shows up without restarting the dashboard.
+# A day matches a daily production ingest; shorten locally if you are
+# ingesting often. Set STAC_DISK_CACHE_TTL=0 to keep rows until the
+# store evicts them.
+_CACHE_TTL_SECONDS = int(os.environ.get("STAC_DISK_CACHE_TTL", "86400"))
 _shared_cache: diskcache.Cache | None = None
 
 
@@ -30,7 +36,7 @@ def _get_shared_cache() -> diskcache.Cache:
             _CACHE_DIR,
             # Use pickle so pystac Item/Collection objects serialise correctly.
             disk=diskcache.Disk,
-            size_limit=256 * 1024 * 1024,  # 256 MiB cap
+            size_limit=1024 * 1024 * 1024,  # 1024 MiB cap
         )
         logger.info("Shared STAC disk cache opened at %s", _CACHE_DIR)
     return _shared_cache
@@ -208,8 +214,10 @@ class STAC:
         key = self._ckey(ns, *parts)
         if isinstance(store, dict):
             store[key] = value
-        else:
-            store.set(key, value)
+            return
+        # 0 means no expiry (tests and local debugging).
+        expire = _CACHE_TTL_SECONDS or None
+        store.set(key, value, expire=expire)
 
     def _search_collection(self, collection_id) -> ItemSearch:
         search = self._catalog.search(collections=[collection_id], max_items=None)
@@ -286,10 +294,8 @@ class STAC:
         missing or leadtime lengths are not uniform.
 
         Fetches the Collection when it is first selected so summaries can
-        fill the date picker. Later calls reuse the cached object.
-
-        Results are cached per collection on this client so switching
-        selection back and forth does not repeat the API call.
+        fill the date picker. Later calls reuse the cached object until
+        it expires.
 
         Returns:
             Sorted list of dicts with keys:
@@ -458,8 +464,8 @@ class STAC:
         Return the STAC Item for one forecast run.
 
         Asks the API for the Item whose start time is exactly this forecast
-        start. The result is cached so opening the same day again does not
-        hit the API.
+        start. The result is cached until it expires, so opening the same
+        day again does not hit the API.
         """
         cached = self._cache_get(self._NS_ITEM, collection_id, forecast_reference_time)
         if cached is not None:
