@@ -1297,9 +1297,7 @@
       ts: Date.now(),
     };
     var result = applyFlyToSideEffects(flyTo(goto));
-    if (result && result.ok === false) {
-      return;
-    }
+    // Keep the selection (and clear control) even if this TMS cannot show it.
     setRegionMeta({
       name: fileName || null,
       bbox: bbox,
@@ -1307,6 +1305,9 @@
       simplified: !!prepared.simplified,
       ts: Date.now(),
     });
+    if (result && result.ok === false) {
+      return;
+    }
     if (prepared.simplified) {
       setRegionStatus("Region simplified for display", "info");
     } else {
