@@ -4,8 +4,6 @@ from typing import Any
 
 BASEMAP_ATTRIBUTION_CARTO = "© OpenStreetMap contributors © CARTO"
 BASEMAP_ATTRIBUTION_OSM = "© OpenStreetMap contributors"
-# Shared default attribution string for host fallbacks.
-BASEMAP_ATTRIBUTION = BASEMAP_ATTRIBUTION_CARTO
 
 # Stable ids used by the UI control and user-prefs.
 BASEMAP_VOYAGER = "voyager"
@@ -77,10 +75,3 @@ def basemap_descriptor(basemap_id: Any = None) -> dict[str, str]:
         "url": entry["url"],
         "attribution": entry["attribution"],
     }
-
-
-# Convenience aliases used by map hosts.
-DEFAULT_BASEMAP_XYZ_URL = _BASEMAPS[DEFAULT_BASEMAP_ID]["url"]
-DEFAULT_BASEMAP_ATTRIBUTION = _BASEMAPS[DEFAULT_BASEMAP_ID]["attribution"]
-# Back-compat with older OSM naming (now points at the default style URL).
-OSM_XYZ_URL = DEFAULT_BASEMAP_XYZ_URL

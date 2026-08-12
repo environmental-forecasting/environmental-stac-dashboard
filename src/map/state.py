@@ -2,12 +2,7 @@
 
 from typing import Any
 
-from .basemap import (
-    DEFAULT_BASEMAP_ATTRIBUTION,
-    DEFAULT_BASEMAP_XYZ_URL,
-    OSM_XYZ_URL,
-    basemap_descriptor,
-)
+from .basemap import basemap_descriptor
 from .projections import MapEngine, MapViewMode, view_hint_for_mode
 
 # Omit a field to keep the previous value; pass None to clear it.
@@ -112,11 +107,7 @@ def _state_content_equal(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return all(left.get(key) == right.get(key) for key in keys)
 
 
-# Re-export basemap URL constants for existing imports.
 __all__ = [
-    "DEFAULT_BASEMAP_ATTRIBUTION",
-    "DEFAULT_BASEMAP_XYZ_URL",
-    "OSM_XYZ_URL",
     "basemap_descriptor",
     "build_map_state",
     "default_basemap",

@@ -1,13 +1,9 @@
 from .basemap import (
-    BASEMAP_ATTRIBUTION,
     BASEMAP_DARK_MATTER,
     BASEMAP_OSM,
     BASEMAP_POSITRON,
     BASEMAP_VOYAGER,
-    DEFAULT_BASEMAP_ATTRIBUTION,
     DEFAULT_BASEMAP_ID,
-    DEFAULT_BASEMAP_XYZ_URL,
-    OSM_XYZ_URL,
     basemap_descriptor,
     list_basemap_options,
     normalise_basemap_id,
@@ -43,7 +39,6 @@ from .tms_client import (
 )
 
 __all__ = [
-    "BASEMAP_ATTRIBUTION",
     "BASEMAP_DARK_MATTER",
     "BASEMAP_OSM",
     "BASEMAP_POSITRON",
@@ -55,9 +50,7 @@ __all__ = [
     "build_map_state",
     "clear_tile_grid_cache",
     "default_basemap",
-    "DEFAULT_BASEMAP_ATTRIBUTION",
     "DEFAULT_BASEMAP_ID",
-    "DEFAULT_BASEMAP_XYZ_URL",
     "epsg_code_for_mode",
     "get_tile_grid",
     "initial_map_state",
@@ -69,7 +62,6 @@ __all__ = [
     "list_view_mode_presets",
     "normalise_basemap_id",
     "normalise_view_mode",
-    "OSM_XYZ_URL",
     "proj4_for_epsg",
     "resolve_engine_for_mode",
     "resolve_view_mode",

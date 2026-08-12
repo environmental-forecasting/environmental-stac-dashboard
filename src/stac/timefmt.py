@@ -36,11 +36,6 @@ def to_calendar_day(value: datetime | date) -> str:
     return value.strftime(CALENDAR_DAY_FMT)
 
 
-def parse_calendar_day(day: str) -> datetime:
-    """Parse ``YYYY-MM-DD`` as midnight UTC."""
-    return datetime.strptime(day, CALENDAR_DAY_FMT).replace(tzinfo=timezone.utc)
-
-
 def to_stac_datetime(value: datetime) -> str:
     """Format a datetime the same way STAC Item properties are written."""
     if value.tzinfo is None:
@@ -53,15 +48,6 @@ def parse_stac_datetime(value: str | datetime) -> datetime:
     if isinstance(value, datetime):
         return value
     return str_to_datetime(value)
-
-
-def date_picker_to_reference_time(day: str) -> str:
-    """
-    Convert a date-picker value (``YYYY-MM-DD``) to ``forecast:reference_time``.
-
-    Assumes forecast initialisation at midnight UTC on that calendar day.
-    """
-    return to_stac_datetime(parse_calendar_day(day))
 
 
 def format_slider_label(

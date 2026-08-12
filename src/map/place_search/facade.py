@@ -80,25 +80,3 @@ _DEFAULT = PlaceSearch()
 def place_search() -> PlaceSearch:
     """Return the shared PlaceSearch facade."""
     return _DEFAULT
-
-
-def search(
-    query: str,
-    *,
-    mode: str | None = None,
-    limit: int = 5,
-    enrich: bool = True,
-) -> list[dict]:
-    """
-    Search for a place using the shared facade.
-
-    Args:
-        query: Free-text place name.
-        mode: Current view mode, accepted for call-site convenience.
-        limit: Maximum number of hits to return.
-        enrich: Whether to attach Natural Earth outlines.
-
-    Returns:
-        List of search hits.
-    """
-    return _DEFAULT.search(query, mode=mode, limit=limit, enrich=enrich)

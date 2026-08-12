@@ -2,7 +2,7 @@
 
 import re
 
-from map.place_search import PlaceSearch, place_search, search
+from map.place_search import place_search
 
 # lat then lon, with optional N/S/E/W. Two bare numbers are read as lat, lon.
 _COORD_RE = re.compile(
@@ -58,8 +58,6 @@ def parse_lon_lat(text: str) -> tuple[float, float] | None:
 
 
 __all__ = [
-    "PlaceSearch",
     "parse_lon_lat",
     "place_search",
-    "search",
 ]

@@ -1,17 +1,14 @@
 dash
 dash_bootstrap_components
 dash-core-components
-dash-extensions
 dash-html-components
 dash_iconify
 dash_mantine_components
 diskcache
 gunicorn
-pandas
 pystac
 pystac-client
 requests
 rio-tiler
-rioxarray
 pyproj
 pydantic-settings

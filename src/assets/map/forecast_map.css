@@ -281,16 +281,6 @@
   opacity: 0.75;
 }
 
-/* Dark glass (floating chrome on the map face). */
-.forecast-glass {
-  background: rgba(18, 22, 32, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  color: #e8ecf4;
-}
-
 /* Shell chrome: timeline + seam + sidebar share the shell gradient. */
 .forecast-chrome {
   color: #e8ecf4;
