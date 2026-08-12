@@ -56,7 +56,7 @@
   }
 
   /**
-   * Camera height that approximately matches OpenLayers / Leaflet zoom.
+   * Camera height that approximately matches OpenLayers zoom.
    *
    * Uses equatorial WebMercator resolution, canvas height, and the active
    * vertical FOV so Globe framing tracks the 2D maps instead of overshooting.
@@ -88,7 +88,7 @@
   }
 
   function paddedRectangleDegrees(west, south, east, north) {
-    // Roughly match the 56px padding used by OL / Leaflet fitBounds.
+    // Roughly match the 56px padding used by OpenLayers fitBounds.
     var padLon = Math.max((east - west) * 0.14, 0.01);
     var padLat = Math.max((north - south) * 0.14, 0.01);
     return Cesium.Rectangle.fromDegrees(
@@ -153,7 +153,7 @@
     }
   }
 
-  // Match OpenLayers / Leaflet highlight styling.
+  // Match OpenLayers highlight styling.
   function strokeColor() {
     return Cesium.Color.fromCssColorString("#5b8def").withAlpha(0.95);
   }
@@ -243,8 +243,8 @@
       return;
     }
     var positions = Cesium.Cartesian3.fromDegreesArray(closed);
-    // GroundPolylinePrimitive keeps a constant screen-pixel width (like OL/Leaflet
-    // strokes). Entity clampToGround polylines look softer and foreshorten.
+    // GroundPolylinePrimitive keeps a constant screen-pixel width (like
+    // OpenLayers strokes). Entity clampToGround polylines look softer and foreshorten.
     if (
       typeof Cesium.GroundPolylineGeometry !== "undefined" &&
       typeof Cesium.GroundPolylinePrimitive !== "undefined"

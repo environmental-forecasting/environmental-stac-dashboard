@@ -466,14 +466,12 @@
 }
 
 #forecast-map-ol,
-#forecast-map-globe,
-#forecast-map-leaflet {
+#forecast-map-globe {
   z-index: 1;
 }
 
 #forecast-map-ol:not(.forecast-map-host--hidden),
-#forecast-map-globe:not(.forecast-map-host--hidden),
-#forecast-map-leaflet:not(.forecast-map-host--hidden) {
+#forecast-map-globe:not(.forecast-map-host--hidden) {
   z-index: 2;
 }
 
@@ -828,11 +826,6 @@
   top: auto;
   left: 0.75rem;
   bottom: 0.75rem;
-}
-
-#forecast-map-leaflet .leaflet-top.leaflet-left {
-  top: auto;
-  bottom: 3.5rem;
 }
 
 /* Controls column + seam (desktop/tablet push layout). */
@@ -1266,11 +1259,6 @@
   left: 0;
 }
 
-/* Shared ramp lives in the timeline. */
-#forecast-map-leaflet .leaflet-control.easy-button-container {
-  display: none !important;
-}
-
 /* Shared control field look: white surface, black text, 32px row. */
 .forecast-controls-panel .dash-dropdown,
 .forecast-controls-panel .dash-dropdown-trigger,
@@ -1437,10 +1425,6 @@
   /* Keep map zoom widgets above a taller stacked timeline. */
   #forecast-map-ol .ol-zoom {
     bottom: 1rem;
-  }
-
-  #forecast-map-leaflet .leaflet-top.leaflet-left {
-    bottom: 4.5rem;
   }
 
   #forecast-map-globe .cesium-viewer-toolbar {

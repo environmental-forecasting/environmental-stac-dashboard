@@ -16,7 +16,7 @@ def convert_colormap_to_colorscale(cmap: str):
     """
     Convert a rio_tiler colormap to colorscale format.
 
-    Uses a shared `ColorMaps` instance and caches the Dash-leaflet colorscale
+    Uses a shared `ColorMaps` instance and caches the colours as rgba
     strings so colormap changes do not rebuild the same palette repeatedly.
 
     Args:

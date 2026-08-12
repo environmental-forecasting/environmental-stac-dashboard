@@ -26,7 +26,6 @@ class MapViewMode(StrEnum):
     """Fixed product view modes (not discovered from TiTiler)."""
 
     GLOBAL_3857 = "global_3857"
-    GLOBAL_LEAFLET = "global_leaflet"
     GLOBE_CESIUM = "globe_cesium"
 
 
@@ -35,13 +34,11 @@ class MapEngine(StrEnum):
 
     OPENLAYERS = "openlayers"
     CESIUM = "cesium"
-    LEAFLET_LEGACY = "leaflet_legacy"
 
 
 _WEB_MERCATOR_MODES = frozenset(
     (
         MapViewMode.GLOBAL_3857.value,
-        MapViewMode.GLOBAL_LEAFLET.value,
         MapViewMode.GLOBE_CESIUM.value,
     )
 )
@@ -55,8 +52,7 @@ def normalise_view_mode(mode: str | None) -> str:
         mode: Raw mode string from the UI or store.
 
     Returns:
-        Mode id (e.g. ``global_3857``, ``global_leaflet``, ``globe_cesium``,
-        or ``EPSG####``).
+        Mode id (e.g. ``global_3857``, ``globe_cesium``, or ``EPSG####``).
     """
     if not mode:
         return MapViewMode.GLOBAL_3857.value
@@ -73,8 +69,7 @@ def tile_matrix_set_for_mode(mode: str) -> str:
     Return the TiTiler tile matrix set id for a view mode.
 
     Args:
-        mode: View mode id (``global_3857``, ``global_leaflet``,
-            ``globe_cesium``, or ``EPSG####``).
+        mode: View mode id (``global_3857``, ``globe_cesium``, or ``EPSG####``).
 
     Returns:
         Tile matrix set identifier such as ``WebMercatorQuad`` or ``EPSG6931``.
@@ -156,8 +151,6 @@ def label_for_view_mode(mode: str) -> str:
     view_mode = normalise_view_mode(mode)
     if view_mode == MapViewMode.GLOBAL_3857.value:
         return "Global"
-    if view_mode == MapViewMode.GLOBAL_LEAFLET.value:
-        return "Leaflet"
     if view_mode == MapViewMode.GLOBE_CESIUM.value:
         return "Globe"
     if view_mode in _TMS_LABELS:
@@ -170,7 +163,7 @@ def label_for_view_mode(mode: str) -> str:
 
 def list_view_mode_options(tiler_url: str) -> list[dict[str, str]]:
     """
-    Build RadioItems options: Global, Leaflet, Globe, then custom TMS grids.
+    Build RadioItems options: Global, Globe, then custom TMS grids.
 
     Engine is derived from the selected mode (no separate renderer control).
 
@@ -184,10 +177,6 @@ def list_view_mode_options(tiler_url: str) -> list[dict[str, str]]:
         {
             "label": label_for_view_mode(MapViewMode.GLOBAL_3857.value),
             "value": MapViewMode.GLOBAL_3857.value,
-        },
-        {
-            "label": label_for_view_mode(MapViewMode.GLOBAL_LEAFLET.value),
-            "value": MapViewMode.GLOBAL_LEAFLET.value,
         },
         {
             "label": label_for_view_mode(MapViewMode.GLOBE_CESIUM.value),
@@ -225,7 +214,7 @@ def resolve_view_mode(mode: str | None, tiler_url: str) -> str:
     Resolve a requested view mode against TiTiler-registered matrices.
 
     Custom ``EPSG####`` modes need that TMS on TiTiler. If it is missing,
-    fall back to global Web Mercator (same capability as the old Leaflet map).
+    fall back to global Web Mercator.
 
     Args:
         mode: Requested view mode id.
@@ -341,7 +330,7 @@ def resolve_engine_for_mode(mode: str) -> str:
     """
     Return the map engine for a view mode.
 
-    Globe uses Cesium, Leaflet mode uses Leaflet, everything else OpenLayers.
+    Globe uses Cesium; everything else uses OpenLayers.
 
     Args:
         mode: View mode id.
@@ -352,6 +341,4 @@ def resolve_engine_for_mode(mode: str) -> str:
     view_mode = normalise_view_mode(mode)
     if view_mode == MapViewMode.GLOBE_CESIUM.value:
         return MapEngine.CESIUM.value
-    if view_mode == MapViewMode.GLOBAL_LEAFLET.value:
-        return MapEngine.LEAFLET_LEGACY.value
     return MapEngine.OPENLAYERS.value

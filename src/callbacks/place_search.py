@@ -219,7 +219,6 @@ def _map_search_clear(n_clicks):
         "forecast-map-search__status",
         "forecast-map-search",
         None,
-        None,
         -1,
     )
 
@@ -303,7 +302,6 @@ def register_callbacks(app: dash.Dash):
         Output("map-search-status", "className", allow_duplicate=True),
         Output("map-search", "className", allow_duplicate=True),
         Output("map-search-debounced", "data", allow_duplicate=True),
-        Output("map-search-highlight", "data", allow_duplicate=True),
         Output("map-search-active", "data", allow_duplicate=True),
         Input("map-search-clear", "n_clicks"),
         prevent_initial_call=True,
@@ -380,9 +378,8 @@ def register_callbacks(app: dash.Dash):
         """
         function(goto) {
             var nu = window.dash_clientside.no_update;
-            // tick, status text, status class, leaflet viewport, highlight geojson
             if (!goto || goto.lon == null || goto.lat == null) {
-                return [nu, nu, nu, nu, nu];
+                return [nu, nu, nu];
             }
             var result = {ok: true};
             if (window.ForecastMap && typeof window.ForecastMap.flyTo === "function") {
@@ -393,28 +390,14 @@ def register_callbacks(app: dash.Dash):
                     nu,
                     result.message || "Outside this map's coverage",
                     "forecast-map-search__status is-warning",
-                    nu,
-                    nu,
                 ];
             }
-            var leaf = result && result.leaflet;
-            if (leaf) {
-                return [
-                    nu,
-                    "",
-                    "forecast-map-search__status",
-                    leaf.viewport != null ? leaf.viewport : nu,
-                    leaf.data != null ? leaf.data : null,
-                ];
-            }
-            return [nu, "", "forecast-map-search__status", nu, nu];
+            return [nu, "", "forecast-map-search__status"];
         }
         """,
         Output("map-bridge-tick", "data", allow_duplicate=True),
         Output("map-search-status", "children", allow_duplicate=True),
         Output("map-search-status", "className", allow_duplicate=True),
-        Output("map", "viewport"),
-        Output("map-search-highlight", "data"),
         Input("map-goto", "data"),
         prevent_initial_call=True,
     )

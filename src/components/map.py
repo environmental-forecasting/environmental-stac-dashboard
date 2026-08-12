@@ -1,54 +1,11 @@
 """Map hosts and shared map stores. View-mode pills live in the header."""
 
-import dash_leaflet as dl
 from dash import dcc, html
 from dash_iconify import DashIconify
-from map.state import DEFAULT_BASEMAP_ATTRIBUTION, DEFAULT_BASEMAP_XYZ_URL, initial_map_state
+from map.state import initial_map_state
 
-# Default Leaflet camera; OpenLayers Global view is synced in while hidden so
-# switching view modes does not animate into place.
-DEFAULT_CENTER = [0, 0]
-DEFAULT_ZOOM = 0
-
-# Leaflet host (hidden unless the Leaflet view mode is selected).
 # Colourbar lives in the timeline (shared HTML ramp), not on the map face.
-# Search highlight: polygons use ``style``; points use Leaflet's default marker.
-_leaflet_map = dl.Map(
-    [
-        dl.TileLayer(
-            id="map-base-layer",
-            url=DEFAULT_BASEMAP_XYZ_URL,
-            attribution=DEFAULT_BASEMAP_ATTRIBUTION,
-            zIndex=0,
-        ),
-        dl.LayersControl([], id="cog-results-layer"),
-        dl.GeoJSON(
-            id="map-search-highlight",
-            data=None,
-            zoomToBounds=False,
-            style={
-                "color": "#5b8def",
-                "weight": 2.5,
-                "opacity": 0.95,
-                "fillColor": "#5b8def",
-                "fillOpacity": 0.16,
-            },
-        ),
-        dl.ScaleControl(position="bottomright"),
-        dl.FullScreenControl(position="bottomleft"),
-    ],
-    crs="EPSG3857",
-    attributionControl=True,
-    style={"width": "inherit", "height": "inherit"},
-    center=DEFAULT_CENTER,
-    zoom=DEFAULT_ZOOM,
-    zoomDelta=0.1,
-    # Allow fractional zoom so a copied OpenLayers Global camera is not snapped.
-    zoomSnap=0,
-    id="map",
-)
-
-leaflet_map = html.Div(
+forecast_map = html.Div(
     className="forecast-map-root",
     children=[
         html.Div(
@@ -71,11 +28,6 @@ leaflet_map = html.Div(
                 html.Div(
                     id="forecast-map-globe",
                     className="forecast-map-host forecast-map-host--hidden",
-                ),
-                html.Div(
-                    id="forecast-map-leaflet",
-                    className="forecast-map-host forecast-map-host--hidden",
-                    children=[_leaflet_map],
                 ),
             ],
         ),

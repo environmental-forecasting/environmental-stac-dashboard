@@ -98,7 +98,7 @@ def test_place_search_uses_nominatim_for_all_modes():
             "source": "nominatim",
         }
     ]
-    modes = ("global_3857", "global_leaflet", "globe_cesium", "EPSG6931", "EPSG6932")
+    modes = ("global_3857", "globe_cesium", "EPSG6931", "EPSG6932")
     for mode in modes:
         with (
             patch("map.place_search.facade.nominatim.search", return_value=fake) as nom,

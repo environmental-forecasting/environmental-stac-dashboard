@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 
 import dash
-import dash_leaflet as dl
 from components.controls import (
     AVAILABLE_COLORMAPS,
     DEFAULT_COLORMAP,
@@ -36,7 +35,6 @@ from user_prefs import (
 
 from map import (
     DEFAULT_BASEMAP_ID,
-    MapEngine,
     MapViewMode,
     basemap_descriptor,
     build_map_state,
@@ -107,47 +105,6 @@ def _end_calendar_day_from_init(row: dict) -> str | None:
     return None
 
 
-_WEB_MERCATOR_Z0 = 156543.03392804097
-
-
-def _mercator_max_native_zoom(gsd: object) -> int | None:
-    """Highest Web Mercator z to fetch before the browser stretches tiles."""
-    try:
-        size = float(gsd)
-    except (TypeError, ValueError):
-        return None
-    if size <= 0:
-        return None
-    min_cell = size / 32
-    for zoom in range(0, 23):
-        if _WEB_MERCATOR_Z0 / (2**zoom) < min_cell:
-            return max(0, zoom - 1)
-    return None
-
-
-def _build_leaflet_overlays(layer_entries: list[dict]) -> list:
-    """Build Leaflet Overlay children from shared layer descriptors."""
-    tile_layers = []
-    for index, layer in enumerate(layer_entries):
-        tile_kwargs: dict = {
-            "id": {"type": "cog-collections", "index": index},
-            "url": layer["tileUrl"],
-            "zIndex": 100,
-            "opacity": layer.get("opacity", 1),
-        }
-        max_native = _mercator_max_native_zoom(layer.get("gsd"))
-        if max_native is not None:
-            tile_kwargs["maxNativeZoom"] = max_native
-        tile_layers.append(
-            dl.Overlay(
-                dl.TileLayer(**tile_kwargs),
-                name=layer.get("title") or layer["id"],
-                checked=layer.get("visible", True),
-            )
-        )
-    return tile_layers
-
-
 # Callback function that will update the output container based on input
 def register_callbacks(app: dash.Dash):
     """
@@ -216,7 +173,7 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_call=True,
     )
 
-    # Push map-state into the OpenLayers / Leaflet bridge.
+    # Push map-state into the OpenLayers / Cesium bridge.
     app.clientside_callback(
         """
         function(mapState) {
@@ -761,7 +718,7 @@ def register_callbacks(app: dash.Dash):
         prevent_initial_call="initial_duplicate",
     )
     def update_map_view_mode_options(_, user_prefs):
-        """Populate Global / Leaflet / Globe + custom EPSG#### views."""
+        """Populate Global / Globe + custom EPSG#### views."""
         options = list_view_mode_options(TILER_INTERNAL_URL)
         presets = list_view_mode_presets(TILER_INTERNAL_URL)
         preferred = preferred_in(
@@ -788,8 +745,6 @@ def register_callbacks(app: dash.Dash):
 
     @app.callback(
         Output("map-state", "data", allow_duplicate=True),
-        Output("map-base-layer", "url"),
-        Output("map-base-layer", "attribution"),
         Input("basemap-style", "value"),
         State("map-state", "data"),
         State("map-view-mode", "value"),
@@ -835,7 +790,7 @@ def register_callbacks(app: dash.Dash):
             basemap=descriptor,
             prefetch_layers=previous.get("prefetchLayers") or [],
         )
-        return next_state, descriptor["url"], descriptor["attribution"]
+        return next_state
 
     @app.callback(
         [
@@ -1091,7 +1046,6 @@ def register_callbacks(app: dash.Dash):
 
     @app.callback(
         Output("map-state", "data", allow_duplicate=True),
-        Output("cog-results-layer", "children", allow_duplicate=True),
         Input("display-style", "data"),
         State("map-state", "data"),
         prevent_initial_call=True,
@@ -1136,41 +1090,7 @@ def register_callbacks(app: dash.Dash):
             view=(map_state or {}).get("view"),
             **build_kwargs,
         )
-        leaflet_children = (
-            _build_leaflet_overlays(rewritten)
-            if engine == MapEngine.LEAFLET_LEGACY.value
-            else []
-        )
-        return next_state, leaflet_children
-
-    @app.callback(
-        Output("cog-results-layer", "children", allow_duplicate=True),
-        Input("map-state", "data"),
-        State("cog-results-layer", "children"),
-        prevent_initial_call=True,
-    )
-    def sync_leaflet_overlays(map_state, current_children):
-        """
-        Build Leaflet Overlay children from published ``map-state``.
-
-        Same layer count keeps the existing TileLayers so play can swap
-        URLs in place. Count or engine changes rebuild or clear.
-        """
-        if not isinstance(map_state, dict):
-            raise PreventUpdate
-        if map_state.get("engine") != MapEngine.LEAFLET_LEGACY.value:
-            if current_children:
-                return []
-            raise PreventUpdate
-        layers = map_state.get("layers") or []
-        if not layers:
-            if current_children:
-                return []
-            raise PreventUpdate
-        n = len(current_children) if current_children else 0
-        if n == len(layers):
-            raise PreventUpdate
-        return _build_leaflet_overlays(layers)
+        return next_state
 
     @app.callback(
         Output("controls-column", "className"),
@@ -1264,9 +1184,6 @@ def register_callbacks(app: dash.Dash):
         Output("basemap-style", "value", allow_duplicate=True),
         Output("display-style", "data", allow_duplicate=True),
         Output("map-state", "data", allow_duplicate=True),
-        Output("map-base-layer", "url", allow_duplicate=True),
-        Output("map-base-layer", "attribution", allow_duplicate=True),
-        Output("cog-results-layer", "children", allow_duplicate=True),
         Input("user-prefs-reset", "n_clicks"),
         prevent_initial_call=True,
     )
@@ -1274,7 +1191,6 @@ def register_callbacks(app: dash.Dash):
         """Clear saved prefs and restore factory controls in the live session."""
         if not _n_clicks:
             raise PreventUpdate
-        factory_basemap = basemap_descriptor(DEFAULT_BASEMAP_ID)
         # Clearing collection cascades date/variable via existing STAC callbacks.
         return (
             None,
@@ -1284,9 +1200,6 @@ def register_callbacks(app: dash.Dash):
             DEFAULT_BASEMAP_ID,
             dict(DEFAULT_DISPLAY_STYLE),
             initial_map_state(),
-            factory_basemap["url"],
-            factory_basemap["attribution"],
-            [],
         )
 
     @app.callback(

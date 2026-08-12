@@ -92,8 +92,7 @@ def test_list_view_mode_options_includes_global_custom_and_globe():
     ):
         options = list_view_mode_options("http://tiler")
     assert options[0] == {"label": "Global", "value": "global_3857"}
-    assert options[1] == {"label": "Leaflet", "value": "global_leaflet"}
-    assert options[2] == {"label": "Globe", "value": "globe_cesium"}
+    assert options[1] == {"label": "Globe", "value": "globe_cesium"}
     assert {"label": "Arctic", "value": "EPSG6931"} in options
     assert {"label": "Antarctic", "value": "EPSG6932"} in options
     assert {"label": "EPSG:3031", "value": "EPSG3031"} in options
@@ -191,7 +190,6 @@ def test_resolve_engine_for_modes():
     assert resolve_engine_for_mode("EPSG6931") == "openlayers"
     assert resolve_engine_for_mode("globe_cesium") == "cesium"
     assert resolve_engine_for_mode("global_3857") == "openlayers"
-    assert resolve_engine_for_mode("global_leaflet") == "leaflet_legacy"
 
 
 def test_unknown_mode_raises():

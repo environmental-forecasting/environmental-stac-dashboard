@@ -79,7 +79,7 @@ def basemap_descriptor(basemap_id: Any = None) -> dict[str, str]:
     }
 
 
-# Convenience aliases used by map hosts / leaflets defaults.
+# Convenience aliases used by map hosts.
 DEFAULT_BASEMAP_XYZ_URL = _BASEMAPS[DEFAULT_BASEMAP_ID]["url"]
 DEFAULT_BASEMAP_ATTRIBUTION = _BASEMAPS[DEFAULT_BASEMAP_ID]["attribution"]
 # Back-compat with older OSM naming (now points at the default style URL).

@@ -643,15 +643,6 @@
     // cannot yank the camera back out to the default extent.
     map.on("pointerdrag", clearPendingFit);
     map.on("singleclick", onNorthUpClick);
-    // Keep the hidden Leaflet Global camera aligned while the user pans/zooms.
-    map.on("moveend", function () {
-      if (
-        global.ForecastMap &&
-        typeof global.ForecastMap.syncLeafletCameraFromOpenLayers === "function"
-      ) {
-        global.ForecastMap.syncLeafletCameraFromOpenLayers();
-      }
-    });
     attachNorthUpViewListeners(map.getView());
     syncRotateInteractions();
     var viewport = map.getViewport();
@@ -1434,12 +1425,6 @@
       view.setCenter(ol.proj.fromLonLat([0, 0], projectionCode));
       view.setZoom(0);
     }
-    if (
-      global.ForecastMap &&
-      typeof global.ForecastMap.syncLeafletCameraFromOpenLayers === "function"
-    ) {
-      global.ForecastMap.syncLeafletCameraFromOpenLayers();
-    }
   }
 
   function resumeNorthUpFollow() {
@@ -1763,6 +1748,7 @@
     lastPlaceGoto = null;
     clearPlaceHighlight();
   }
+
 
   function getCameraLonLat() {
     if (!map) {

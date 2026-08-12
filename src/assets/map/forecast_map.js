@@ -1,8 +1,8 @@
 /**
  * Forecast map bridge.
  *
- * Dash writes `map-state`; this module shows the right host (OpenLayers,
- * Cesium, or Leaflet) and forwards the state to the active renderer. Skips
+ * Dash writes `map-state`; this module shows the right host (OpenLayers
+ * or Cesium) and forwards the state to the active renderer. Skips
  * work when `revision` is unchanged so tile layers are not rebuilt
  * unnecessarily.
  *
@@ -215,16 +215,12 @@
     if (mode === "globe_cesium") {
       return "cesium";
     }
-    if (mode === "global_leaflet") {
-      return "leaflet_legacy";
-    }
     return "openlayers";
   }
 
   function tmsForMode(mode) {
     if (
       mode === "global_3857" ||
-      mode === "global_leaflet" ||
       mode === "globe_cesium" ||
       !mode
     ) {
@@ -340,7 +336,6 @@
     if (
       !mode ||
       mode === "global_3857" ||
-      mode === "global_leaflet" ||
       mode === "globe_cesium"
     ) {
       return true;
@@ -602,14 +597,6 @@
       schedulePrefetch(lastState);
       return true;
     }
-    // Leaflet has no soft-swap here: Dash TileLayer URL updates via set_props
-    // keep Global play moving (may flicker between frames).
-    if (activeEngine === "leaflet_legacy" || currentEngine() === "leaflet_legacy") {
-      syncLeafletOverlayUrls(layers);
-      setTilesReady(true);
-      schedulePrefetch(lastState);
-      return true;
-    }
     // Unknown host: clear the play gate so ticks are not stuck waiting.
     setTilesReady(true);
     return false;
@@ -737,7 +724,6 @@
       return;
     }
 
-    var leafletHost = document.getElementById("forecast-map-leaflet");
     var globeHost = document.getElementById("forecast-map-globe");
     var olHost = document.getElementById("forecast-map-ol");
 
@@ -746,14 +732,6 @@
         olHost.classList.remove("forecast-map-host--hidden");
       } else {
         olHost.classList.add("forecast-map-host--hidden");
-      }
-    }
-
-    if (leafletHost) {
-      if (engine === "leaflet_legacy") {
-        leafletHost.classList.remove("forecast-map-host--hidden");
-      } else {
-        leafletHost.classList.add("forecast-map-host--hidden");
       }
     }
 
@@ -772,7 +750,6 @@
     }
 
     // New frame: block play until the renderer calls setTilesReady(true).
-    // Leaflet has no shared load hook here - treat as ready after apply.
     // Soft-swap rebuilds own the banner; scrub never calls this path.
     // A TMS switch clears the previous overlay immediately; keep
     // "Loading tiles…" up until the new grid has painted.
@@ -780,7 +757,7 @@
       previous &&
       ((previous.engine || "openlayers") !== engine ||
         (previous.mode || "") !== (state.mode || ""));
-    if (engine !== "leaflet_legacy" && (layers.length || modeChanged)) {
+    if (layers.length || modeChanged) {
       setTilesReady(false);
       setBusy("Loading tiles…", "tiles");
     } else {
@@ -792,9 +769,6 @@
     // asked to rebuild layers on every engine / TMS switch.
     if (engine === "openlayers" && global.ForecastMapOpenLayers) {
       global.ForecastMapOpenLayers.applyState(state);
-      // Keep the hidden Leaflet map on the same Global camera so switching
-      // view modes does not animate/zoom into place.
-      syncLeafletCameraFromOpenLayers();
       if (lastPlaceGoto) {
         global.requestAnimationFrame(function () {
           var result = flyTo(lastPlaceGoto);
@@ -817,35 +791,6 @@
     }
     if (engine !== "cesium" && global.ForecastMapCesium) {
       global.ForecastMapCesium.applyState({ engine: "none", revision: -1 });
-    }
-
-    if (engine === "leaflet_legacy") {
-      setTilesReady(true);
-      endDashMapWait();
-      if (lastPlaceGoto) {
-        global.requestAnimationFrame(function () {
-          // Silent: camera should already match when switching; place highlight only.
-          var result = flyToLeaflet(lastPlaceGoto, { animate: false });
-          publishPlaceStatus(result);
-          if (
-            result &&
-            result.leaflet &&
-            global.dash_clientside &&
-            typeof global.dash_clientside.set_props === "function"
-          ) {
-            var leaf = result.leaflet;
-            if (leaf.viewport) {
-              global.dash_clientside.set_props("map", {
-                invalidateSize: true,
-                viewport: leaf.viewport,
-              });
-            }
-            global.dash_clientside.set_props("map-search-highlight", {
-              data: leaf.data != null ? leaf.data : null,
-            });
-          }
-        });
-      }
     }
   }
 
@@ -905,11 +850,6 @@
     publishDashMapState();
   }
 
-  var LEAFLET_WORLD_BOUNDS = [
-    [-85.051129, -180.0],
-    [85.051129, 180.0],
-  ];
-
   /**
    * Restore the default framing for the active engine / TMS.
    *
@@ -918,26 +858,6 @@
   function resetView() {
     clearNorthUpSelection();
     var engine = currentEngine();
-    if (engine === "leaflet_legacy") {
-      if (
-        global.dash_clientside &&
-        typeof global.dash_clientside.set_props === "function"
-      ) {
-        global.dash_clientside.set_props("map", {
-          invalidateSize: true,
-          viewport: {
-            bounds: LEAFLET_WORLD_BOUNDS,
-            transition: "fitBounds",
-            options: {
-              paddingTopLeft: [20, 20],
-              paddingBottomRight: [20, 20],
-              animate: false,
-            },
-          },
-        });
-      }
-      return;
-    }
     if (
       engine === "cesium" &&
       global.ForecastMapCesium &&
@@ -1014,187 +934,6 @@
     });
   }
 
-  function geojsonIsPointOnly(geojson) {
-    if (!geojson || !geojson.type) {
-      return true;
-    }
-    if (geojson.type === "Point" || geojson.type === "MultiPoint") {
-      return true;
-    }
-    if (geojson.type === "Feature") {
-      return geojsonIsPointOnly(geojson.geometry);
-    }
-    if (geojson.type === "FeatureCollection") {
-      var features = geojson.features || [];
-      return (
-        !features.length ||
-        features.every(function (feature) {
-          return geojsonIsPointOnly(feature);
-        })
-      );
-    }
-    return false;
-  }
-
-  function leafletHighlightData(goto) {
-    if (!goto || goto.lon == null || goto.lat == null) {
-      return null;
-    }
-    // Area geojson first; point-only geojson yields to bbox outline when present.
-    if (goto.geojson && goto.geojson.type && !geojsonIsPointOnly(goto.geojson)) {
-      if (
-        goto.geojson.type === "Feature" ||
-        goto.geojson.type === "FeatureCollection"
-      ) {
-        return goto.geojson;
-      }
-      return {
-        type: "Feature",
-        properties: {},
-        geometry: goto.geojson,
-      };
-    }
-    if (goto.bbox && goto.bbox.length >= 4) {
-      var w = Number(goto.bbox[0]);
-      var s = Number(goto.bbox[1]);
-      var e = Number(goto.bbox[2]);
-      var n = Number(goto.bbox[3]);
-      return {
-        type: "Feature",
-        properties: {},
-        geometry: {
-          type: "Polygon",
-          coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]],
-        },
-      };
-    }
-    if (goto.geojson && goto.geojson.type) {
-      if (
-        goto.geojson.type === "Feature" ||
-        goto.geojson.type === "FeatureCollection"
-      ) {
-        return goto.geojson;
-      }
-      return {
-        type: "Feature",
-        properties: {},
-        geometry: goto.geojson,
-      };
-    }
-    return {
-      type: "Feature",
-      properties: {},
-      geometry: {
-        type: "Point",
-        coordinates: [Number(goto.lon), Number(goto.lat)],
-      },
-    };
-  }
-
-  function syncLeafletCameraFromOpenLayers() {
-    if (
-      !global.dash_clientside ||
-      typeof global.dash_clientside.set_props !== "function"
-    ) {
-      return;
-    }
-    if (
-      !global.ForecastMapOpenLayers ||
-      typeof global.ForecastMapOpenLayers.getCameraLonLat !== "function"
-    ) {
-      return;
-    }
-    var cam = global.ForecastMapOpenLayers.getCameraLonLat();
-    if (!cam) {
-      return;
-    }
-    // Only mirror Web Mercator Global; polar cameras do not map 1:1 to Leaflet.
-    if (cam.projection && cam.projection !== "EPSG:3857") {
-      return;
-    }
-    global.dash_clientside.set_props("map", {
-      viewport: {
-        center: [cam.lat, cam.lon],
-        zoom: cam.zoom,
-        transition: "setView",
-        options: { animate: false },
-      },
-    });
-  }
-
-  function flyToLeaflet(goto, opts) {
-    if (!goto || goto.lon == null || goto.lat == null) {
-      return { ok: true, skipped: true };
-    }
-    var lat = Number(goto.lat);
-    var lon = Number(goto.lon);
-    if (!isFinite(lat) || !isFinite(lon)) {
-      return { ok: false, message: "Invalid location" };
-    }
-    var zoom =
-      goto.zoom != null && isFinite(Number(goto.zoom)) ? Number(goto.zoom) : 14;
-    var animate = !(opts && opts.animate === false);
-    // dash-leaflet: center/zoom/bounds are initial-only. Post-init camera moves
-    // must go through the ``viewport`` prop.
-    var viewport;
-    if (goto.bbox && goto.bbox.length >= 4) {
-      var west = Number(goto.bbox[0]);
-      var south = Number(goto.bbox[1]);
-      var east = Number(goto.bbox[2]);
-      var north = Number(goto.bbox[3]);
-      // Rough WebMercator zoom from span. If fitting the outline would zoom
-      // out past the place zoom, keep the suggested zoom instead.
-      var span = Math.max(east - west, north - south, 1e-6);
-      var fittedZoom = Math.log2(360 / span);
-      if (
-        isFinite(zoom) &&
-        zoom <= 8 &&
-        isFinite(fittedZoom) &&
-        fittedZoom < zoom - 0.05
-      ) {
-        viewport = {
-          center: [lat, lon],
-          zoom: zoom,
-          transition: animate ? "flyTo" : "setView",
-          options: animate ? { duration: 0.45 } : { animate: false },
-        };
-      } else {
-        viewport = {
-          bounds: [
-            [south, west],
-            [north, east],
-          ],
-          transition: animate ? "flyToBounds" : "fitBounds",
-          options: animate
-            ? {
-                padding: [56, 56],
-                maxZoom: Math.max(zoom, 16),
-                duration: 0.45,
-              }
-            : {
-                padding: [56, 56],
-                maxZoom: Math.max(zoom, 16),
-                animate: false,
-              },
-        };
-      }
-    } else {
-      viewport = {
-        center: [lat, lon],
-        zoom: zoom,
-        transition: animate ? "flyTo" : "setView",
-        options: animate ? { duration: 0.45 } : { animate: false },
-      };
-    }
-    return {
-      ok: true,
-      leaflet: {
-        viewport: viewport,
-        data: leafletHighlightData(goto),
-      },
-    };
-  }
-
   function currentEngine() {
     if (lastState && lastState.engine) {
       return lastState.engine;
@@ -1202,22 +941,12 @@
     if (activeEngine) {
       return activeEngine;
     }
-    var leafletHost = document.getElementById("forecast-map-leaflet");
-    if (
-      leafletHost &&
-      !leafletHost.classList.contains("forecast-map-host--hidden")
-    ) {
-      return "leaflet_legacy";
-    }
     return "openlayers";
   }
 
   function flyTo(goto) {
     if (goto && goto.lon != null && goto.lat != null) {
       lastPlaceGoto = goto;
-    }
-    if (currentEngine() === "leaflet_legacy") {
-      return flyToLeaflet(goto);
     }
     if (currentEngine() === "cesium") {
       if (
@@ -1244,21 +973,6 @@
     if (result.ok === false) {
       publishPlaceStatus(result);
       return result;
-    }
-    var leaf = result.leaflet;
-    if (
-      leaf &&
-      global.dash_clientside &&
-      typeof global.dash_clientside.set_props === "function"
-    ) {
-      if (leaf.viewport != null) {
-        global.dash_clientside.set_props("map", { viewport: leaf.viewport });
-      }
-      if (leaf.data !== undefined) {
-        global.dash_clientside.set_props("map-search-highlight", {
-          data: leaf.data,
-        });
-      }
     }
     return result;
   }
@@ -1429,7 +1143,7 @@
     };
   }
 
-  // OL is loaded via CDN for every map mode; use it to simplify for Leaflet / Cesium / OL alike.
+  // OL is loaded via CDN for every map mode; use it to simplify regions.
   function requireOlSimplify() {
     if (
       typeof ol === "undefined" ||
@@ -1699,12 +1413,6 @@
     }
     publishPlaceStatus({ ok: true });
     setRegionMeta(null);
-    if (
-      global.dash_clientside &&
-      typeof global.dash_clientside.set_props === "function"
-    ) {
-      global.dash_clientside.set_props("map-search-highlight", { data: null });
-    }
   }
 
   function setBtnClass(id, className) {
@@ -2130,34 +1838,6 @@
     setDashProps("map-state", { data: lastState });
   }
 
-  function syncLeafletOverlayUrls(layers) {
-    if (
-      activeEngine !== "leaflet_legacy" &&
-      currentEngine() !== "leaflet_legacy"
-    ) {
-      return;
-    }
-    if (
-      !global.dash_clientside ||
-      typeof global.dash_clientside.set_props !== "function"
-    ) {
-      return;
-    }
-    var li;
-    for (li = 0; li < (layers || []).length; li += 1) {
-      if (!layers[li] || !layers[li].tileUrl) {
-        continue;
-      }
-      global.dash_clientside.set_props(
-        { type: "cog-collections", index: li },
-        {
-          url: layers[li].tileUrl,
-          opacity: layers[li].opacity == null ? 1 : layers[li].opacity,
-        }
-      );
-    }
-  }
-
   function setDashProps(id, props) {
     if (
       global.dash_clientside &&
@@ -2193,7 +1873,6 @@
       })
     );
     publishDashMapState();
-    syncLeafletOverlayUrls(layers);
     return true;
   }
 
@@ -2525,6 +2204,5 @@
     isOrientationRotated: isOrientationRotated,
     resetOrientation: resetOrientation,
     resetView: resetView,
-    syncLeafletCameraFromOpenLayers: syncLeafletCameraFromOpenLayers,
   };
 })(window);

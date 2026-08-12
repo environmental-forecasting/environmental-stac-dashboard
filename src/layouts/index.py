@@ -22,7 +22,7 @@ layout = dmc.MantineProvider(
                     html.Div(
                         [
                             html.Div(
-                                map.leaflet_map,
+                                map.forecast_map,
                                 className="forecast-map-column__map",
                             ),
                             timeline.timeline_bar,
