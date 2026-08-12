@@ -2016,6 +2016,9 @@
       endDashMapWait();
       return;
     }
+    var previousIds = Object.keys(
+      (lastForecastItems && lastForecastItems.collections) || {}
+    );
     lastForecastItems = { collections: collections, bands: bandTable };
     var times = shortestTimes;
     setDashProps("leadtime-axis", {
@@ -2023,8 +2026,17 @@
     });
     var bandIndex = resolveBandIndex(bandTable.bands, opts.variable);
     var previousStyle = opts.displayStyle || {};
+    var collectionsChanged =
+      previousIds.length > 0 &&
+      previousIds.slice().sort().join("\0") !==
+        Object.keys(collections).sort().join("\0");
+    var keepLock =
+      !collectionsChanged &&
+      previousStyle.locked &&
+      previousStyle.vmin != null &&
+      previousStyle.vmax != null;
     var rescale = null;
-    if (previousStyle.locked && previousStyle.vmin != null && previousStyle.vmax != null) {
+    if (keepLock) {
       rescale = [Number(previousStyle.vmin), Number(previousStyle.vmax)];
     } else {
       rescale = rescaleFromBands(bandTable.bandProps, bandIndex);
@@ -2037,7 +2049,7 @@
     }
     var colormap =
       opts.colormap || previousStyle.colormap || "blues_r";
-    if (!previousStyle.locked) {
+    if (!keepLock) {
       setDashProps("display-style", {
         data: {
           colormap: colormap,
