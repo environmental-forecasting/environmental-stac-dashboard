@@ -5,7 +5,7 @@ from typing import Any
 # Keep in sync with controls / header defaults (avoid importing Dash layout).
 DEFAULT_COLORMAP = "blues_r"
 DEFAULT_VIEW_MODE = "global_3857"
-DEFAULT_BASEMAP_ID = "voyager"
+DEFAULT_BASEMAP_ID = "osm"
 
 
 def normalise_user_prefs(raw: Any) -> dict[str, Any]:

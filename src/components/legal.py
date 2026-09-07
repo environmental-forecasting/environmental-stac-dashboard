@@ -132,9 +132,30 @@ COPYRIGHT_BODY = html.Div(
         _section(
             "Maps and imagery",
             [
-                "Basemap tiles and place names come from third-party providers "
-                "and are used under their attribution and licence requirements "
-                "(shown with the map where applicable).",
+                [
+                    "Basemap tiles are provided by ",
+                    _external_ref(
+                        "OpenStreetMap",
+                        "https://www.openstreetmap.org/copyright",
+                    ),
+                    " (data licensed under the ",
+                    _external_ref(
+                        "Open Database License",
+                        "https://opendatacommons.org/licenses/odbl/",
+                    ),
+                    ", cartography licensed as ",
+                    _external_ref(
+                        "CC BY-SA",
+                        "https://creativecommons.org/licenses/by-sa/2.0/",
+                    ),
+                    ") and ",
+                    _external_ref(
+                        "CARTO",
+                        "https://carto.com/attributions",
+                    ),
+                    ". Place name search is backed by OpenStreetMap Nominatim and Natural Earth.",
+                ],
+                "Third-party map services and geographic data are used under their respective attribution and licence requirements.",
             ],
         ),
     ],

@@ -43,10 +43,10 @@ def test_normalise_and_preferred():
 def test_merge_user_prefs():
     assert merge_user_prefs(colormap="blues_r", view_mode=DEFAULT_VIEW_MODE) is None
     assert merge_user_prefs(collection=None, colormap=None) is None
-    assert merge_user_prefs(basemap="voyager", colormap="blues_r") is None
+    assert merge_user_prefs(basemap="osm", colormap="blues_r") is None
+    assert merge_user_prefs(basemap="voyager") == {"basemap": "voyager"}
     assert merge_user_prefs(basemap="positron") == {"basemap": "positron"}
     assert merge_user_prefs(basemap="dark_matter") == {"basemap": "dark_matter"}
-    assert merge_user_prefs(basemap="osm") == {"basemap": "osm"}
 
     cleared = merge_user_prefs(
         collection=None,

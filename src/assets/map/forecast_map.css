@@ -947,6 +947,23 @@
   margin-top: 16px;
 }
 
+.forecast-controls__help-text {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.forecast-controls__help-text a {
+  color: rgba(255, 255, 255, 0.6);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.forecast-controls__help-text a:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
 /* Fixed-height timeline below the map - joins seam/sidebar/footer. */
 .forecast-timeline {
   flex: 0 0 var(--layout-timeline);

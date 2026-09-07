@@ -4,10 +4,11 @@
   "use strict";
 
   var HOST_ID = "forecast-map-ol";
-  // Free Carto Voyager (OSM-derived); reprojected into polar/custom views.
+  // Free OpenStreetMap; reprojected into polar/custom views.
   var DEFAULT_BASEMAP_URL =
-    "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
-  var DEFAULT_BASEMAP_ATTRIBUTION = "© OpenStreetMap contributors © CARTO";
+    "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+  var DEFAULT_BASEMAP_ATTRIBUTION =
+    '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors';
   var forecastLayersById = {};
   // Leadtime / style swaps in flight: the incoming tiles paint above the
   // stable overlay so the previous step stays visible until they are ready.

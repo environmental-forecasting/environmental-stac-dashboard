@@ -4,10 +4,11 @@
   "use strict";
 
   var HOST_ID = "forecast-map-globe";
-  // Free Carto Voyager (OSM-derived); kept in polar views via OL/Cesium.
+  // Free OpenStreetMap; kept in polar views via OL/Cesium.
   var DEFAULT_BASEMAP_URL =
-    "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
-  var DEFAULT_BASEMAP_CREDIT = "© OpenStreetMap contributors © CARTO";
+    "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+  var DEFAULT_BASEMAP_CREDIT =
+    '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors';
   var forecastLayersById = {};
   var forecastUrlsById = {};
   // URL swaps stack a hidden/incoming layer above the stable one until ready.

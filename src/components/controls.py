@@ -2,7 +2,7 @@
 
 import dash_mantine_components as dmc
 from dash import dcc, html
-from map.basemap import DEFAULT_BASEMAP_ID, list_basemap_options
+from map.basemap import CARTO_API_KEY_URL, DEFAULT_BASEMAP_ID, list_basemap_options
 from rio_tiler.colormap import ColorMaps
 
 AVAILABLE_COLORMAPS = ColorMaps().list()
@@ -75,6 +75,18 @@ controls_panel = html.Div(
             value=DEFAULT_BASEMAP_ID,
             clearable=False,
             className="forecast-controls__dropdown",
+        ),
+        html.P(
+            [
+                "CARTO basemaps (Voyager, Positron, Dark Matter) require an API key. ",
+                html.A(
+                    "Register for a free key.",
+                    href=CARTO_API_KEY_URL,
+                    target="_blank",
+                    rel="noopener noreferrer",
+                ),
+            ],
+            className="forecast-controls__help-text",
         ),
         html.Button(
             "Reset defaults",
